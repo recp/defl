@@ -20,7 +20,7 @@
 extern "C" {
 #endif
 
-#ifndef IM__in__UNZ
+#if !defined(IM__in__UNZ) && !defined(unz_common_h)
 
 #ifndef _USE_MATH_DEFINES
 #  define _USE_MATH_DEFINES       /* for windows */
