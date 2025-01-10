@@ -82,7 +82,7 @@ infl_block(defl_stream_t      * __restrict stream,
   uint8_t * __restrict dst;
   size_t  * __restrict dst_pos;
   unz__bitstate_t bs;
-  size_t          dst_cap, dpos;
+  size_t          dst_cap, dpos, src;
   uint_fast32_t   len,  dist;
   uint_fast16_t   lsym, dsym;
   hval_t          val;
@@ -148,9 +148,28 @@ infl_block(defl_stream_t      * __restrict stream,
       return UNZ_EFULL;
 
     /* output back-reference */
-    while (len--) {
-      dst[dpos] = dst[dpos - dist];
-      dpos++;
+    if (dist == 1) {
+      used = dst[dpos - 1];
+      /* TODO: is it worth to unroll loop here? */
+      while (len >= 4) {
+        dst[dpos]   = used;
+        dst[dpos+1] = used;
+        dst[dpos+2] = used;
+        dst[dpos+3] = used;
+        len-=4;dpos+=4;
+      }
+      while (len--) dst[dpos++] = used;
+    } else {
+      src = dpos - dist;
+      /* TODO: is it worth to unroll loop here? */
+      while (len >= 4) {
+        dst[dpos]   = dst[src];
+        dst[dpos+1] = dst[src+1];
+        dst[dpos+2] = dst[src+2];
+        dst[dpos+3] = dst[src+3];
+        len-=4;dpos+=4;src+=4;
+      }
+      while (len--) dst[dpos++] = dst[src++];
     }
   }
 
