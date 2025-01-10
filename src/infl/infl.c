@@ -261,9 +261,12 @@ infl(defl_stream_t * __restrict stream) {
         RESTORE();
         break;
       case 2: {
-        uint_fast8_t  codelens[MAX_CODELEN_CODES]={0};
-        uint_fast8_t  lens[MAX_LITLEN_CODES + MAX_DIST_CODES]={0};
-        huff_table_t  dyn_tlitl={0}, dyn_tdist={0}, tcodelen={0};
+        union {
+          uint_fast8_t codelens[MAX_CODELEN_CODES];
+          uint_fast8_t lens[MAX_LITLEN_CODES + MAX_DIST_CODES];
+        } lens={0};
+
+        huff_table_t  dyn_tlen={0}, dyn_tdist={0};
         size_t        i;
         uint_fast32_t n;
         uint_fast16_t sym, hclen, hlit, hdist;
@@ -279,65 +282,68 @@ infl(defl_stream_t * __restrict stream) {
         if (n > MAX_LITLEN_CODES + MAX_DIST_CODES)
           goto err;
 
-        memset(codelens, 0, sizeof(codelens));
         for (i = 0; i < hclen; i++) {
           REFILL(3);
-          codelens[l_orders[i]] = bs.bits & 0x7;
+          lens.codelens[l_orders[i]] = bs.bits & 0x7;
           CONSUME(3);
         }
 
-        if (!huff_init_lsb(&tcodelen, codelens, NULL, MAX_CODELEN_CODES))
+        if (!huff_init_lsb(&dyn_tlen, lens.codelens, NULL, MAX_CODELEN_CODES))
           goto err;
+
+        for (i = hclen; i < MAX_CODELEN_CODES; i++) lens.codelens[i] = 0;
 
         i = 0;
         while (i < n) {
           REFILL(15);
-          sym = huff_decode_lsb(&tcodelen, bs.bits, 15, &used);
-          if (!used) goto err;
+          sym = huff_decode_lsb(&dyn_tlen, bs.bits, 15, &used);
+          if (!used || sym > 18) goto err;
           CONSUME(used);
 
-          if (sym <= 15) {
-            lens[i++] = sym;
-          } else if (sym == 16) {
-            REFILL(2);
-            repeat = 3 + (bs.bits & 0x3);
-            CONSUME(2);
+          switch (sym) {
+            default: {
+              lens.lens[i++] = sym; /* sym <= 15 */
+            } break;
+            case 16: {
+              REFILL(2);
+              repeat = 3 + (bs.bits & 0x3);
+              CONSUME(2);
 
-            if (i == 0 || i + repeat > n)
-              goto err;
+              if (i == 0 || i + repeat > n)
+                goto err;
 
-            prev = lens[i - 1];
-            while (repeat--) lens[i++] = prev;
-          } else if (sym == 17) {
-            REFILL(3);
-            repeat = 3 + (bs.bits & 0x7);
-            CONSUME(3);
+              prev = lens.lens[i - 1];
+              while (repeat--) lens.lens[i++] = prev;
+            } break;
+            case  17: {
+              REFILL(3);
+              repeat = 3 + (bs.bits & 0x7);
+              CONSUME(3);
 
-            if (i + repeat > n)
-              goto err;
+              if (i + repeat > n)
+                goto err;
 
-            memset(&lens[i], 0, repeat);
-            i += repeat;
-          } else if (sym == 18) {
-            REFILL(7);
-            repeat = 11 + (bs.bits & 0x7F);
-            CONSUME(7);
+              while (repeat--) lens.lens[i++] = 0;
+            } break;
+            case 18: {
+              REFILL(7);
+              repeat = 11 + (bs.bits & 0x7F);
+              CONSUME(7);
 
-            if (i + repeat > n)
-              goto err;
+              if (i + repeat > n)
+                goto err;
 
-            memset(&lens[i], 0, repeat);
-            i += repeat;
-          } else {
-            goto err;
+              while (repeat--) lens.lens[i++] = 0;
+            } break;
           }
         }
 
-        if (!huff_init_lsb(&dyn_tlitl, lens,      NULL, hlit))  goto err;
-        if (!huff_init_lsb(&dyn_tdist, lens+hlit, NULL, hdist)) goto err;
+        /* re-use dyn_tlen to reduce mem */
+        if (!huff_init_lsb(&dyn_tlen,  lens.lens,      NULL, hlit))  goto err;
+        if (!huff_init_lsb(&dyn_tdist, lens.lens+hlit, NULL, hdist)) goto err;
 
         DONATE();
-        if (infl_block(stream, &dyn_tlitl, &dyn_tdist) != UNZ_OK) {
+        if (infl_block(stream, &dyn_tlen, &dyn_tdist) != UNZ_OK) {
           goto err;
         }
         RESTORE();
