@@ -266,7 +266,7 @@ infl(defl_stream_t * __restrict stream) {
           uint_fast8_t lens[MAX_LITLEN_CODES + MAX_DIST_CODES];
         } lens={0};
 
-        huff_table_t  dyn_tlen={0}, dyn_tdist={0};
+        huff_table_t  dyn_tlen, dyn_tdist;
         size_t        i;
         uint_fast32_t n;
         uint_fast16_t sym, hclen, hlit, hdist;
