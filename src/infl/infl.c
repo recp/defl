@@ -17,6 +17,7 @@
 #include "../common.h"
 #include "../zlib/zlib.h"
 #include <math.h>
+#include <huff/huff.h>
 
 #define MAX_CODELEN_CODES 19
 #define MAX_LITLEN_CODES  288
@@ -74,7 +75,7 @@ static inline uint_fast16_t min16(uint_fast16_t a, uint_fast16_t b) { return a <
     }                                                                         \
   }                                                                           \
 
-UNZ_INLINE
+static
 UnzResult
 infl_block(defl_stream_t      * __restrict stream,
            const huff_table_t * __restrict tlit,
