@@ -46,13 +46,9 @@ typedef struct unz__stream_t defl_stream_t;
 
 struct unz__chunk_t {
   struct unz__chunk_t *next;
-  FILE                *file;
   const uint8_t       *p;
   const uint8_t       *end;
-  uint32_t             len;
-  uint32_t             off; /* file offset */
   size_t               bitpos;
-  bool                 ismmap;
 };
 
 #define BITS_TYPE uint_fast64_t
