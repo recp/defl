@@ -303,6 +303,7 @@
 		1E783B722D220B160020C7D3 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				CLANG_ENABLE_MODULES = NO;
 				CODE_SIGN_STYLE = Automatic;
 				DEVELOPMENT_TEAM = 43HMQY7T5T;
 				EXECUTABLE_PREFIX = lib;
@@ -317,6 +318,7 @@
 		1E783B732D220B160020C7D3 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				CLANG_ENABLE_MODULES = NO;
 				CODE_SIGN_STYLE = Automatic;
 				DEVELOPMENT_TEAM = 43HMQY7T5T;
 				EXECUTABLE_PREFIX = lib;
