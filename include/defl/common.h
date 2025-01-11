@@ -37,15 +37,7 @@ extern "C" {
 /* since C99 or compiler ext */
 #include <stdint.h>
 #include <stddef.h>
-#include <float.h>
 #include <stdbool.h>
-#include <errno.h>
-#include <stdlib.h>
-
-#ifdef DEBUG
-#  include <assert.h>
-#  include <stdio.h>
-#endif
 
 #if defined(_MSC_VER) || defined(__MINGW32__) || defined(__MINGW64__)
 #  define UNZ_WINAPI
