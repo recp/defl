@@ -23,7 +23,7 @@
 #define MAX_LITLEN_CODES  288
 #define MAX_DIST_CODES    32
 
-typedef struct {uint_fast16_t base;uint_fast8_t bits;} hval_t;
+typedef struct {int base:16,bits:8;} hval_t;
 
 static const hval_t lvals[] = {
   {3,0},{4,0},{5, 0},{6,0},{7,0},{8,0},{9,0},{10,0},{11,1},{13,1},{15,1},
