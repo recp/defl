@@ -48,7 +48,7 @@ static inline uint_fast16_t min16(uint_fast16_t a, uint_fast16_t b) { return a <
 #define EXTRACT(B,C) ((B) & (((bitstream_t)1 << (C)) - 1))
 #define CONSUME(N)   bs.bits >>= (N);bs.nbits -= (N);
 #define RESTORE()    bs=stream->bs;
-#define DONATE()     stream->bs=bs;memset(&bs,0,sizeof(bs));
+#define DONATE()     stream->bs=bs;bs.bits=0;bs.nbits=0;bs.npbits=0;bs.pbits=0;bs.chunk=NULL;
 
 #define REFILL(req)                                                           \
   while (bs.nbits < (req)) {                                                  \
@@ -150,7 +150,17 @@ infl_block(defl_stream_t      * __restrict stream,
     /* output back-reference */
     if (dist == 1) {
       used = dst[dpos - 1];
-      /* TODO: is it worth to unroll loop here? */
+      while (len >= 8) {
+        dst[dpos]   = used;
+        dst[dpos+1] = used;
+        dst[dpos+2] = used;
+        dst[dpos+3] = used;
+        dst[dpos+4] = used;
+        dst[dpos+5] = used;
+        dst[dpos+6] = used;
+        dst[dpos+7] = used;
+        len-=8;dpos+=8;
+      }
       while (len >= 4) {
         dst[dpos]   = used;
         dst[dpos+1] = used;
@@ -161,7 +171,6 @@ infl_block(defl_stream_t      * __restrict stream,
       while (len--) dst[dpos++] = used;
     } else {
       src = dpos - dist;
-      /* TODO: is it worth to unroll loop here? */
       while (len >= 4) {
         dst[dpos]   = dst[src];
         dst[dpos+1] = dst[src+1];
