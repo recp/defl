@@ -98,7 +98,7 @@ infl_block(defl_stream_t      * __restrict stream,
 
   while (true) {
     /* decode literal/length symbol */
-    REFILL(15);
+    REFILL(32);
     lsym = huff_decode_lsb(tlit, bs.bits, 15, &used);
     if (!used || lsym > 285)
       return UNZ_ERR; /* invalid symbol */
@@ -169,7 +169,13 @@ infl_block(defl_stream_t      * __restrict stream,
         dst[dpos+3] = used;
         len-=4;dpos+=4;
       }
-      while (len--) dst[dpos++] = used;
+      dst[dpos] = used;
+      switch (len) {
+        case 3: dst[dpos+1] = used;dst[dpos+2] = used; break;
+        case 2: dst[dpos+1] = used; break;
+        default: break;
+      }
+      dpos += len;
     } else {
       src = dpos - dist;
       while (len >= 4) {
@@ -179,7 +185,15 @@ infl_block(defl_stream_t      * __restrict stream,
         dst[dpos+3] = dst[src+3];
         len-=4;dpos+=4;src+=4;
       }
-      while (len--) dst[dpos++] = dst[src++];
+
+      dst[dpos] = dst[src];
+      switch (len) {
+        case 3: dst[dpos+1] = dst[src+1]; dst[dpos+2] = dst[src+2]; break;
+        case 2: dst[dpos+1] = dst[src+1]; break;
+        default: break;
+      }
+      src  += len;
+      dpos += len;
     }
   }
 
