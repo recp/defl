@@ -334,7 +334,7 @@ infl(defl_stream_t * __restrict stream) {
         if (!huff_init_lsb(&dyn_tlen, lens.codelens, NULL, MAX_CODELEN_CODES))
           goto err;
 
-        for (i = hclen; i < MAX_CODELEN_CODES; i++) lens.codelens[i] = 0;
+        for (i = 0; i < MAX_CODELEN_CODES; i++) lens.codelens[i] = 0;
 
         i = 0;
         while (i < n) {
