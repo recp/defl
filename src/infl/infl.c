@@ -173,7 +173,6 @@ infl_block(defl_stream_t      * __restrict stream,
       switch (len) {
         case 3: dst[dpos+2] = used;
         case 2: dst[dpos+1] = used; break;
-        default: break;
       }
       dpos += len;
     } else {
@@ -190,7 +189,6 @@ infl_block(defl_stream_t      * __restrict stream,
       switch (len) {
         case 3: dst[dpos+2] = dst[src+2];
         case 2: dst[dpos+1] = dst[src+1]; break;
-        default: break;
       }
       src  += len;
       dpos += len;
