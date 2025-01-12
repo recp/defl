@@ -75,7 +75,7 @@ static inline uint_fast16_t min16(uint_fast16_t a, uint_fast16_t b) { return a <
     }                                                                         \
   }                                                                           \
 
-static 
+static inline
 UnzResult
 infl_block(defl_stream_t      * __restrict stream,
            const huff_table_t * __restrict tlit,
