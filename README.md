@@ -1,8 +1,8 @@
 # 🗜️ defl - deflate (WIP)
 
-A high-performance DEFLATE/ZLIB decompression implementation in C. Optimized for minimal memory usage and maximum throughput.
+A high-performance, small DEFLATE/ZLIB decompression implementation in C. Optimized for minimal memory usage and maximum throughput.
 
-- 📌 To get best performance try to compiler sources directly into project instead of external linking
+- 📌 To get best performance try to compile sources directly into project instead of external linking
 - 📌 Feel free to report any bugs security issues by opening an issue
 
 ---
