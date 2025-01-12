@@ -26,6 +26,8 @@ Instead of embedding deflate anf huffman impl into my project, I decided to spli
 - 🔄 Streaming decompression support **(WIP)**
 - 🛡️ Robust error handling
 
+---
+
 #### Usage 1: Use Non-Contiguous Chunk Api
 
 ```c
