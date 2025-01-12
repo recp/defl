@@ -43,7 +43,7 @@ res = infl(st);
 UnzResult res;
 
 /* decompress contiguous regions */
-res = infl_buf(src, srclen, dst, dstlen flags);
+res = infl_buf(src, srclen, dst, dstlen 1); /* 1: INFL_ZLIB or jsut pass INFL_ZLIB */
 ```
 
 ## TODO
