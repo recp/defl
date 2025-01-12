@@ -47,7 +47,33 @@ infl_include(st, src, srclen);
 res = infl(st);
 ```
 
-#### Usage 1: Use Contiguous Chunk Api
+#### Usage 2: Use Stream Api ( TODO: WIP )
+
+```c
+#include <defl/infl.h>
+
+infl_stream_t st;
+UnzResult     res;
+
+infl_init(&st, dst, dstlen, 1); /* 1: INFL_ZLIB or jsut pass INFL_ZLIB */
+
+/* decompress when new data avail */
+res = infl_stream(st, src, srclen);
+
+...
+
+/* decompress again when previous response is UNZ_UNFINISHED */
+if (res == UNZ_UNFINISHED) {
+  res = infl_stream(st, src, srclen);
+}
+
+...
+if (res == UNZ_UNFINISHED) {
+  res = infl_stream(st, src, srclen);
+}
+```
+
+#### Usage 3: Use Contiguous Chunk Api
 
 ```c
 #include <defl/infl.h>
