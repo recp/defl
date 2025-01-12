@@ -334,9 +334,9 @@ infl(defl_stream_t * __restrict stream) {
         if (!huff_init_lsb(&dyn_tlen, lens.codelens, NULL, MAX_CODELEN_CODES))
           goto err;
 
-        for (i = 0; i < MAX_CODELEN_CODES; i++) lens.codelens[i] = 0;
+        /* clean used union prefix then ensure i=0 after loop exit */
+        for (i = MAX_CODELEN_CODES-1; i; i--) lens.codelens[i] = 0;
 
-        i = 0;
         while (i < n) {
           REFILL(15);
           sym = huff_decode_lsb(&dyn_tlen, bs.bits, 15, &used);
