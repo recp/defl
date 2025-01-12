@@ -12,6 +12,7 @@
 		1E9338442D3126CC00A39B9B /* zlib.h in Headers */ = {isa = PBXBuildFile; fileRef = 1E9338422D3126CC00A39B9B /* zlib.h */; };
 		1E9338462D3126E700A39B9B /* common.h in Headers */ = {isa = PBXBuildFile; fileRef = 1E9338452D3126E700A39B9B /* common.h */; };
 		1E93384A2D31286F00A39B9B /* libhuff.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 1E9338492D31286F00A39B9B /* libhuff.a */; };
+		1EC9EA302D33C0C200295BF0 /* mem.c in Sources */ = {isa = PBXBuildFile; fileRef = 1EC9EA2F2D33C0BB00295BF0 /* mem.c */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -22,6 +23,8 @@
 		1E9338422D3126CC00A39B9B /* zlib.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = zlib.h; sourceTree = "<group>"; };
 		1E9338452D3126E700A39B9B /* common.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = common.h; sourceTree = "<group>"; };
 		1E9338492D31286F00A39B9B /* libhuff.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; path = libhuff.a; sourceTree = BUILT_PRODUCTS_DIR; };
+		1EC9EA2C2D331C0400295BF0 /* LICENSE */ = {isa = PBXFileReference; lastKnownFileType = text; path = LICENSE; sourceTree = "<group>"; };
+		1EC9EA2F2D33C0BB00295BF0 /* mem.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = mem.c; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -39,6 +42,7 @@
 		1E783B642D220B160020C7D3 = {
 			isa = PBXGroup;
 			children = (
+				1EC9EA2C2D331C0400295BF0 /* LICENSE */,
 				1E783B742D220B1D0020C7D3 /* include */,
 				1E9338232D301DFE00A39B9B /* src */,
 				1E9338482D31286F00A39B9B /* Frameworks */,
@@ -68,6 +72,7 @@
 				1E9338432D3126CC00A39B9B /* zlib */,
 				1E9338472D31282B00A39B9B /* infl */,
 				1E9338452D3126E700A39B9B /* common.h */,
+				1EC9EA2F2D33C0BB00295BF0 /* mem.c */,
 			);
 			path = src;
 			sourceTree = "<group>";
@@ -179,6 +184,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				1E93383D2D31253C00A39B9B /* infl.c in Sources */,
+				1EC9EA302D33C0C200295BF0 /* mem.c in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -308,7 +314,10 @@
 				DEVELOPMENT_TEAM = 43HMQY7T5T;
 				EXECUTABLE_PREFIX = lib;
 				MACOSX_DEPLOYMENT_TARGET = 13.0;
-				OTHER_CFLAGS = "-ffast-math";
+				OTHER_CFLAGS = (
+					"-flto",
+					"-ffast-math",
+				);
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
 				SYSTEM_HEADER_SEARCH_PATHS = "$(PROJECT_DIR)/../huff/include";
@@ -323,7 +332,10 @@
 				DEVELOPMENT_TEAM = 43HMQY7T5T;
 				EXECUTABLE_PREFIX = lib;
 				MACOSX_DEPLOYMENT_TARGET = 13.0;
-				OTHER_CFLAGS = "-ffast-math";
+				OTHER_CFLAGS = (
+					"-flto",
+					"-ffast-math",
+				);
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
 				SYSTEM_HEADER_SEARCH_PATHS = "$(PROJECT_DIR)/../huff/include";
