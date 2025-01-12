@@ -402,3 +402,19 @@ infl(defl_stream_t * __restrict stream) {
 err:
   return UNZ_ERR;
 }
+
+UNZ_EXPORT
+defl_stream_t *
+infl_init(const void * __restrict dst, uint32_t dstlen, int flags) {
+  infl_stream_t *st;
+
+  st          = calloc(1, sizeof(*st));
+  st->dst     = (uint8_t *)dst;
+  st->dstlen  = dstlen;
+
+  st->malloc  = malloc;
+  st->realloc = realloc;
+  st->free    = free;
+
+  return st;
+}
