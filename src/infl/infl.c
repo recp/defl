@@ -129,7 +129,7 @@ infl_block(defl_stream_t      * __restrict stream,
     /* decode distance symbol */
     REFILL(15);
     dsym = huff_decode_lsb(tdist, bs.bits, 15, &used);
-    if (!used)
+    if (unlikely(!used))
       return UNZ_ERR; /* invalid symbol */
     CONSUME(used);
 
@@ -142,10 +142,10 @@ infl_block(defl_stream_t      * __restrict stream,
     }
 
     /* validate distance */
-    if (dist > dpos)
+    if (unlikely(dist > dpos))
       return UNZ_ERR; /* invalid distance */
 
-    if ((dpos + len) > dst_cap)
+    if (unlikely((dpos + len) > dst_cap))
       return UNZ_EFULL;
 
     /* output back-reference */
@@ -171,7 +171,7 @@ infl_block(defl_stream_t      * __restrict stream,
       }
       dst[dpos] = used;
       switch (len) {
-        case 3: dst[dpos+1] = used;dst[dpos+2] = used; break;
+        case 3: dst[dpos+2] = used;
         case 2: dst[dpos+1] = used; break;
         default: break;
       }
@@ -188,7 +188,7 @@ infl_block(defl_stream_t      * __restrict stream,
 
       dst[dpos] = dst[src];
       switch (len) {
-        case 3: dst[dpos+1] = dst[src+1]; dst[dpos+2] = dst[src+2]; break;
+        case 3: dst[dpos+2] = dst[src+2];
         case 2: dst[dpos+1] = dst[src+1]; break;
         default: break;
       }
