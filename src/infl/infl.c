@@ -191,7 +191,6 @@ infl_block(defl_stream_t      * __restrict stream,
         case 3: dst[dpos+2] = dst[src+2];
         case 2: dst[dpos+1] = dst[src+1]; break;
       }
-      src  += len;
       dpos += len;
     }
   }
