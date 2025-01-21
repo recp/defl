@@ -49,9 +49,9 @@ infl_init(const void * __restrict dst, uint32_t dstlen, int flags);
  */
 UNZ_EXPORT
 void
-infl_include(unz_t      * __restrict stream,
-             const void * __restrict ptr,
-             uint32_t                len);
+infl_include(infl_stream_t * __restrict stream,
+             const void    * __restrict ptr,
+             uint32_t                   len);
 
 /*!
  * @brief inflate given deflated content, all included chunks will be inflated
@@ -104,5 +104,11 @@ infl_buf(const void * __restrict src,
 
   return ret;
 }
+
+UNZ_EXPORT
+int
+infl_stream(infl_stream_t * __restrict stream,
+            const void    * __restrict src,
+            uint32_t                   srclen);
 
 #endif /* infl_h */

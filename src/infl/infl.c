@@ -15,6 +15,7 @@
  */
 
 #include "../common.h"
+#include "../../include/defl/infl.h"
 #include "../zlib/zlib.h"
 #include <math.h>
 #include <huff/huff.h>
@@ -399,6 +400,14 @@ infl(defl_stream_t * __restrict stream) {
   return UNZ_OK;
 err:
   return UNZ_ERR;
+}
+
+UNZ_EXPORT
+int
+infl_stream(infl_stream_t * __restrict stream,
+            const void    * __restrict src,
+            uint32_t                   srclen) {
+  return infl(stream);
 }
 
 UNZ_EXPORT

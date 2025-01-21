@@ -315,8 +315,13 @@
 				EXECUTABLE_PREFIX = lib;
 				MACOSX_DEPLOYMENT_TARGET = 13.0;
 				OTHER_CFLAGS = (
+					"-Wall",
 					"-flto",
+					"-Wundef",
 					"-ffast-math",
+					"-Wstrict-prototypes",
+					"-Wmissing-prototypes",
+					"-Wdeclaration-after-statement",
 				);
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
@@ -333,8 +338,13 @@
 				EXECUTABLE_PREFIX = lib;
 				MACOSX_DEPLOYMENT_TARGET = 13.0;
 				OTHER_CFLAGS = (
+					"-Wall",
 					"-flto",
+					"-Wundef",
 					"-ffast-math",
+					"-Wstrict-prototypes",
+					"-Wmissing-prototypes",
+					"-Wdeclaration-after-statement",
 				);
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;

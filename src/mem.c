@@ -15,12 +15,13 @@
  */
 
 #include "common.h"
+#include "../include/defl/infl.h"
 
 UNZ_EXPORT
 void
 infl_include(infl_stream_t * __restrict stream,
              const void    * __restrict ptr,
-             uint32_t                  len) {
+             uint32_t                   len) {
   unz_chunk_t *chk;
 
   chk      = calloc(1, sizeof(*chk));
