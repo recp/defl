@@ -45,7 +45,8 @@ static const uint_fast8_t
   f_ldist[32]  = {[0 ...31]=5}
 ;
 
-static inline uint_fast16_t min16(uint_fast16_t a, uint_fast16_t b) { return a < b ? a : b; }
+UNZ_INLINE uint_fast16_t min16(uint_fast16_t a, uint_fast16_t b) { return a < b ? a : b; }
+UNZ_INLINE int min(int a, int b) { return a < b ? a : b; }
 
 #define EXTRACT(B,C)  ((B) & (((bitstream_t)1 << (C)) - 1))
 #define CONSUME(N)    bs.bits >>= (N);bs.nbits -= (N);
@@ -57,7 +58,7 @@ static inline uint_fast16_t min16(uint_fast16_t a, uint_fast16_t b) { return a <
 
 #define REFILL(req)                                                           \
   while (bs.nbits < (req)) {                                                  \
-    uint_fast16_t shr;                                                        \
+    int shr;                                                                  \
     if (!bs.npbits) {                                                         \
       if (unlikely((bs.chunk->p >= bs.chunk->end)                             \
           && (!(bs.chunk = bs.chunk->next) || !bs.chunk->p)))                 \
@@ -68,7 +69,7 @@ static inline uint_fast16_t min16(uint_fast16_t a, uint_fast16_t b) { return a <
     }                                                                         \
                                                                               \
     bs.bits   |= (bs.pbits&BITS_MASKMSBI) << bs.nbits;                        \
-    shr        = min16(min16(BITS_SZF-bs.nbits,bs.npbits),BITS_MSBI);         \
+    shr        = min(min(BITS_SZF-bs.nbits,bs.npbits),BITS_MSBI);             \
                                                                               \
     bs.pbits >>= shr;                                                         \
     bs.nbits  += shr;                                                         \
