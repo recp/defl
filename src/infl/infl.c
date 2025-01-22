@@ -152,6 +152,15 @@ infl_block(defl_stream_t      * __restrict stream,
     /* output back-reference */
     if (dist == 1) {
       used = dst[dpos - 1];
+#if defined(__ARM_NEON) || defined(__ARM_NEON__)
+      if (len >= 16) {
+        uint8x16_t value = vdupq_n_u8(used);
+        do {
+          vst1q_u8(&dst[dpos], value);
+          len-=16;dpos+=16;
+        } while (len >= 16);
+      }
+#endif
       while (len >= 8) {
         dst[dpos]   = used;
         dst[dpos+1] = used;
@@ -178,6 +187,14 @@ infl_block(defl_stream_t      * __restrict stream,
       dpos += len;
     } else {
       src = dpos - dist;
+#if defined(__ARM_NEON) || defined(__ARM_NEON__)
+      if (len >= 16 && dist >= 16) {
+        do {
+          vst1q_u8(&dst[dpos], vld1q_u8(&dst[src]));
+          len-=16;dpos+=16;src+=16;
+        } while (len >= 16);
+      }
+#endif
       while (len >= 4) {
         dst[dpos]   = dst[src];
         dst[dpos+1] = dst[src+1];
@@ -185,7 +202,6 @@ infl_block(defl_stream_t      * __restrict stream,
         dst[dpos+3] = dst[src+3];
         len-=4;dpos+=4;src+=4;
       }
-
       dst[dpos] = dst[src];
       switch (len) {
         case 3: dst[dpos+2] = dst[src+2];
