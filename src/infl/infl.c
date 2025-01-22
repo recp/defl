@@ -20,6 +20,10 @@
 #include <math.h>
 #include <huff/huff.h>
 
+#if defined(__ARM_NEON) || defined(__ARM_NEON__)
+#  include <arm_neon.h>
+#endif
+
 #define MAX_CODELEN_CODES 19
 #define MAX_LITLEN_CODES  288
 #define MAX_DIST_CODES    32
