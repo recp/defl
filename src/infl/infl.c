@@ -47,34 +47,33 @@ static const uint_fast8_t
 
 static inline uint_fast16_t min16(uint_fast16_t a, uint_fast16_t b) { return a < b ? a : b; }
 
-#define EXTRACT(B,C) ((B) & (((bitstream_t)1 << (C)) - 1))
-#define CONSUME(N)   bs.bits >>= (N);bs.nbits -= (N);
-#define RESTORE()    bs=stream->bs;
-#define DONATE()     stream->bs=bs;bs.bits=0;bs.nbits=0;bs.npbits=0;bs.pbits=0;bs.chunk=NULL;
+#define EXTRACT(B,C)  ((B) & (((bitstream_t)1 << (C)) - 1))
+#define CONSUME(N)    bs.bits >>= (N);bs.nbits -= (N);
+#define RESTORE()     bs=stream->bs;
+#define DONATE()      stream->bs=bs;bs.bits=0;bs.nbits=0;bs.npbits=0;bs.pbits=0;bs.chunk=NULL;
+
+#define BITS_MSBI     (BITS_SZF-1)
+#define BITS_MASKMSBI ((1ULL << BITS_MSBI) - 1)
 
 #define REFILL(req)                                                           \
   while (bs.nbits < (req)) {                                                  \
+    uint_fast16_t shr;                                                        \
     if (!bs.npbits) {                                                         \
-      if ((bs.chunk->p >= bs.chunk->end)                                      \
-          && (!(bs.chunk = bs.chunk->next) || !bs.chunk->p)) {                \
+      if (unlikely((bs.chunk->p >= bs.chunk->end)                             \
+          && (!(bs.chunk = bs.chunk->next) || !bs.chunk->p)))                 \
         return UNZ_ERR;                                                       \
-      }                                                                       \
       bs.pbits = huff_read(&bs.chunk->p, &bs.chunk->bitpos,                   \
                            &bs.npbits, bs.chunk->end);                        \
-      if (!bs.npbits) { return UNZ_ERR;  }                                    \
+      if (unlikely(!bs.npbits)) return UNZ_ERR;                               \
     }                                                                         \
                                                                               \
-    if (!bs.nbits) {                                                          \
-      bs.bits    = bs.pbits;                                                  \
-      bs.nbits   = min16(BITS_SZF,bs.npbits);                                 \
-      bs.pbits   = bs.nbits<bs.npbits?bs.pbits>>bs.nbits:0;                   \
-      bs.npbits  = bs.nbits<bs.npbits?bs.npbits-bs.nbits:0;                   \
-   } else {                                                                   \
-      int nt     = min16(BITS_SZF-bs.nbits,bs.npbits);                        \
-      bs.bits   |= EXTRACT(bs.pbits,nt) << bs.nbits;                          \
-      bs.pbits >>= nt; bs.nbits += nt; bs.npbits -= nt;                       \
-    }                                                                         \
-  }                                                                           \
+    bs.bits   |= (bs.pbits&BITS_MASKMSBI) << bs.nbits;                        \
+    shr        = min16(min16(BITS_SZF-bs.nbits,bs.npbits),BITS_MSBI);         \
+                                                                              \
+    bs.pbits >>= shr;                                                         \
+    bs.nbits  += shr;                                                         \
+    bs.npbits -= shr;                                                         \
+  }
 
 static inline
 UnzResult
