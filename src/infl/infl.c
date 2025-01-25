@@ -28,19 +28,19 @@
 #define MAX_LITLEN_CODES  288
 #define MAX_DIST_CODES    32
 
-typedef struct {int base:16,bits:8;} hval_t;
-
 static const huff_ext_t lvals[] = {
-  {3,0},{4,0},{5, 0},{6,0},{7,0},{8,0},{9,0},{10,0},{11,1},{13,1},{15,1},
-  {17,1},{19,2},{23,2},{27,2},{31,2},{35,3},{43,3},{51,3},{59,3},{67, 4},
-  {83, 4},{99, 4},{115, 4},{131, 5},{163, 5},{195, 5},{227, 5},{258,  0}
+  {3,0,0},{4,0,0},{5,0,0},{6,0,0},{7,0,0},{8,0,0},{9,0,0},{10,0,0},{11,1,1},
+  {13,1,1},{15,1,1},{17,1,1},{19,2,3},{23,2,3},{27,2,3},{31,2,3},{35,3,7},
+  {43,3,7},{51,3,7},{59,3,7},{67,4,15},{83,4,15},{99,4,15},{115,4,15},
+  {131,5,31},{163,5,31},{195,5,31},{227,5,31},{258,0,0}
 };
 
 static const huff_ext_t dvals[] = {
-  {1,0},{2,0},{3,0},{4,0},{5,1},{7,1},{9, 2},{13,  2},{17,    3},
-  {25,3},{33,4},{49,4},{65,5},{97,5},{129,6},{193, 6},{257,   7},
-  {385,7},{513,8},{769,8},{1025,9},{1537,9},{2049,10},{3073, 10},
-  {4097,11},{6145,11},{8193,12},{12289,12},{16385,13},{24577,13}
+  {1,0,0},{2,0,0},{3,0,0},{4,0,0},{5,1,1},{7,1,1},{9,2,3},{13,2,3},{17,3,7},
+  {25,3,7},{33,4,15},{49,4,15},{65,5,31},{97,5,31},{129,6,63},{193,6,63},
+  {257,7,127},{385,7,127},{513,8,255},{769,8,255},{1025,9,511},{1537,9,511},
+  {2049,10,1023},{3073,10,1023},{4097,11,2047},{6145,11,2047},
+  {8193,12,4095},{12289,12,4095},{16385,13,8191},{24577,13,8191}
 };
 
 static const uint_fast8_t
@@ -89,9 +89,8 @@ infl_block(defl_stream_t        * __restrict stream,
   size_t  * __restrict dst_pos;
   unz__bitstate_t bs;
   size_t          dst_cap, dpos, src;
-  uint32_t   len,  dist;
-  uint_fast16_t   lsym, dsym;
-  huff_ext_t      val;
+  unsigned        len,  dist;
+  uint_fast16_t   lsym;
   uint8_t         used;
 
   dst     = stream->dst;
@@ -99,12 +98,12 @@ infl_block(defl_stream_t        * __restrict stream,
   dst_pos = &stream->dstpos;
   dpos    = *dst_pos;
 
-  RESTORE()
+  RESTORE();
 
   while (true) {
     /* decode literal/length symbol */
     REFILL(32);
-    lsym = huff_decode_lsb_ext_o(tlit, bs.bits, 15, &used, &len, 257);
+    lsym = huff_decode_lsb_extof(tlit, bs.bits, &used, &len, 257);
     if (!used || lsym > 285)
       return UNZ_ERR; /* invalid symbol */
 
@@ -122,11 +121,10 @@ infl_block(defl_stream_t        * __restrict stream,
     }
 
     /* validate distance */
-    dsym = huff_decode_lsb_ext(tdist, bs.bits, 15, &used, &dist);
+    dist = huff_decode_lsb_ext(tdist, bs.bits, &used);
     if (unlikely(!used || dist > dpos))
       return UNZ_ERR;
     CONSUME(used);
-
 
     if (unlikely((dpos + len) > dst_cap))
       return UNZ_EFULL;
@@ -215,8 +213,8 @@ infl(defl_stream_t * __restrict stream) {
 
   /* initilize static tables */
   if (!_init) {
-    if (!huff_init_lsb_ext_o(&_tlitl, f_llitl, NULL, lvals, 257, 29)
-     || !huff_init_lsb_ext_o(&_tdist, f_ldist, NULL, dvals, 0,   30)) {
+    if (!huff_init_lsb_extof(&_tlitl, f_llitl, NULL, lvals, 257, 29) ||
+        !huff_init_lsb_ext(&_tdist, f_ldist, NULL, dvals, 30)) {
       return UNZ_ERR;
     }
     _init = true;
@@ -306,13 +304,12 @@ infl(defl_stream_t * __restrict stream) {
           uint_fast8_t codelens[MAX_CODELEN_CODES];
           uint_fast8_t lens[MAX_LITLEN_CODES + MAX_DIST_CODES];
         } lens={0};
-        huff_table_t      tcodelen;
-        huff_table_ext_t  dyn_tlen, dyn_tdist;
+        huff_table_t     tcodelen;
+        huff_table_ext_t dyn_tlen, dyn_tdist;
         size_t        i;
         uint_fast32_t n;
         uint_fast16_t sym, hclen, hlit, hdist;
         uint_fast8_t  repeat, prev;
-        huff_ext_t    no_extra = {0, 0}; // For code length symbols
 
         REFILL(14);
         hlit  = (bs.bits & 0x1F) + 257;
@@ -380,12 +377,8 @@ infl(defl_stream_t * __restrict stream) {
           }
         }
 
-        /* Initialize length decoder with length extras */
-        if (!huff_init_lsb_ext_o(&dyn_tlen, lens.lens, NULL, lvals, 257, hlit))
-          goto err;
-
-        /* Initialize distance decoder with distance extras */
-        if (!huff_init_lsb_ext_o(&dyn_tdist, lens.lens+hlit, NULL, dvals, 0, hdist))
+        if (!huff_init_lsb_extof(&dyn_tlen,lens.lens,NULL,lvals,257,hlit) ||
+            !huff_init_lsb_ext(&dyn_tdist,lens.lens+hlit,NULL,dvals,hdist))
           goto err;
 
         DONATE();
