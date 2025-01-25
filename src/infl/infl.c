@@ -82,17 +82,17 @@ UNZ_INLINE int min(int a, int b) { return a < b ? a : b; }
 
 static inline
 UnzResult
-infl_block(defl_stream_t      * __restrict stream,
-           const huff_table_t * __restrict tlit,
-           const huff_table_t * __restrict tdist) {
+infl_block(defl_stream_t        * __restrict stream,
+           const huff_table_ext_t * __restrict tlit,
+           const huff_table_ext_t * __restrict tdist) {
   uint8_t * __restrict dst;
   size_t  * __restrict dst_pos;
   unz__bitstate_t bs;
   size_t          dst_cap, dpos, src;
-  uint_fast32_t   len,  dist;
+  uint32_t   len,  dist;
   uint_fast16_t   lsym, dsym;
   huff_ext_t      val;
-  uint_fast8_t    used;
+  uint8_t         used;
 
   dst     = stream->dst;
   dst_cap = stream->dstlen;
@@ -104,7 +104,7 @@ infl_block(defl_stream_t      * __restrict stream,
   while (true) {
     /* decode literal/length symbol */
     REFILL(32);
-    lsym = huff_decode_lsb(tlit, bs.bits, 15, &used);
+    lsym = huff_decode_lsb_ext_o(tlit, bs.bits, 15, &used, &len, 257);
     if (!used || lsym > 285)
       return UNZ_ERR; /* invalid symbol */
 
@@ -121,34 +121,12 @@ infl_block(defl_stream_t      * __restrict stream,
       break;
     }
 
-    /* back-reference length */
-    val = lvals[lsym - 257];
-    len = val.base;
-
-    if (val.bits) {
-      REFILL(val.bits);
-      len += EXTRACT(bs.bits, val.bits);
-      CONSUME(val.bits);
-    }
-
-    /* decode distance symbol */
-    REFILL(15);
-    dsym = huff_decode_lsb(tdist, bs.bits, 15, &used);
-    if (unlikely(!used))
-      return UNZ_ERR; /* invalid symbol */
+    /* validate distance */
+    dsym = huff_decode_lsb_ext(tdist, bs.bits, 15, &used, &dist);
+    if (unlikely(!used || dist > dpos))
+      return UNZ_ERR;
     CONSUME(used);
 
-    val  = dvals[dsym];
-    dist = val.base;
-    if (val.bits) {
-      REFILL(val.bits);
-      dist += EXTRACT(bs.bits, val.bits);
-      CONSUME(val.bits);
-    }
-
-    /* validate distance */
-    if (unlikely(dist > dpos))
-      return UNZ_ERR; /* invalid distance */
 
     if (unlikely((dpos + len) > dst_cap))
       return UNZ_EFULL;
@@ -225,7 +203,7 @@ infl_block(defl_stream_t      * __restrict stream,
 UNZ_EXPORT
 int
 infl(defl_stream_t * __restrict stream) {
-  static huff_table_t _tlitl={0}, _tdist={0};
+  static huff_table_ext_t _tlitl={0}, _tdist={0};
   static bool         _init=false;
 
   unz__bitstate_t bs;
@@ -237,8 +215,10 @@ infl(defl_stream_t * __restrict stream) {
 
   /* initilize static tables */
   if (!_init) {
-    huff_init_lsb(&_tlitl, f_llitl, NULL, ARRAY_LEN(f_llitl));
-    huff_init_lsb(&_tdist, f_ldist, NULL, ARRAY_LEN(f_ldist));
+    if (!huff_init_lsb_ext_o(&_tlitl, f_llitl, NULL, lvals, 257, 29)
+     || !huff_init_lsb_ext_o(&_tdist, f_ldist, NULL, dvals, 0,   30)) {
+      return UNZ_ERR;
+    }
     _init = true;
   }
 
@@ -326,12 +306,13 @@ infl(defl_stream_t * __restrict stream) {
           uint_fast8_t codelens[MAX_CODELEN_CODES];
           uint_fast8_t lens[MAX_LITLEN_CODES + MAX_DIST_CODES];
         } lens={0};
-
-        huff_table_t  dyn_tlen, dyn_tdist;
+        huff_table_t      tcodelen;
+        huff_table_ext_t  dyn_tlen, dyn_tdist;
         size_t        i;
         uint_fast32_t n;
         uint_fast16_t sym, hclen, hlit, hdist;
         uint_fast8_t  repeat, prev;
+        huff_ext_t    no_extra = {0, 0}; // For code length symbols
 
         REFILL(14);
         hlit  = (bs.bits & 0x1F) + 257;
@@ -349,7 +330,7 @@ infl(defl_stream_t * __restrict stream) {
           CONSUME(3);
         }
 
-        if (!huff_init_lsb(&dyn_tlen, lens.codelens, NULL, MAX_CODELEN_CODES))
+        if (!huff_init_lsb(&tcodelen, lens.codelens, NULL, MAX_CODELEN_CODES))
           goto err;
 
         /* clean used union prefix then ensure i=0 after loop exit */
@@ -357,7 +338,7 @@ infl(defl_stream_t * __restrict stream) {
 
         while (i < n) {
           REFILL(15);
-          sym = huff_decode_lsb(&dyn_tlen, bs.bits, 15, &used);
+          sym = huff_decode_lsb(&tcodelen, bs.bits, 15, &used);
           if (!used || sym > 18) goto err;
           CONSUME(used);
 
@@ -399,9 +380,13 @@ infl(defl_stream_t * __restrict stream) {
           }
         }
 
-        /* re-use dyn_tlen to reduce mem */
-        if (!huff_init_lsb(&dyn_tlen,  lens.lens,      NULL, hlit))  goto err;
-        if (!huff_init_lsb(&dyn_tdist, lens.lens+hlit, NULL, hdist)) goto err;
+        /* Initialize length decoder with length extras */
+        if (!huff_init_lsb_ext_o(&dyn_tlen, lens.lens, NULL, lvals, 257, hlit))
+          goto err;
+
+        /* Initialize distance decoder with distance extras */
+        if (!huff_init_lsb_ext_o(&dyn_tdist, lens.lens+hlit, NULL, dvals, 0, hdist))
+          goto err;
 
         DONATE();
         if (infl_block(stream, &dyn_tlen, &dyn_tdist) != UNZ_OK) {
