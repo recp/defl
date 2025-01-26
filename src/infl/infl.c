@@ -80,7 +80,7 @@ UNZ_INLINE int min(int a, int b) { return a < b ? a : b; }
     bs.npbits -= shr;                                                         \
   }
 
-static inline
+static
 UnzResult
 infl_block(defl_stream_t        * __restrict stream,
            const huff_table_ext_t * __restrict tlit,
