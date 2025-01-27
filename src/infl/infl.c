@@ -325,7 +325,7 @@ infl(defl_stream_t * __restrict stream) {
           CONSUME(3);
         }
 
-        if (!huff_init_lsb(&tcodelen, lens.codelens, NULL, MAX_CODELEN_CODES))
+        if (!huff_init_fast_lsb(&tcodelen, lens.codelens, NULL, MAX_CODELEN_CODES))
           goto err;
 
         /* clean used union prefix then ensure i=0 after loop exit */
