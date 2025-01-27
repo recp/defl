@@ -306,10 +306,7 @@ infl(defl_stream_t * __restrict stream) {
         } lens={0};
         huff_table_t     tcodelen;
         huff_table_ext_t dyn_tlen, dyn_tdist;
-        size_t        i;
-        uint_fast32_t n;
-        uint_fast16_t sym, hclen, hlit, hdist;
-        uint_fast8_t  repeat, prev;
+        int              i, n, sym, hclen, hlit, hdist, repeat, prev;
 
         REFILL(14);
         hlit  = (bs.bits & 0x1F) + 257;
