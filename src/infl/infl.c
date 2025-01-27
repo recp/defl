@@ -307,7 +307,7 @@ infl(defl_stream_t * __restrict stream) {
         huff_table_t      tcodelen;
         huff_table_ext_t  dyn_tlen, dyn_tdist;
         huff_fast_entry_t fe;
-        int               i, n, sym, hclen, hlit, hdist, repeat, prev;
+        int               i, n, hclen, hlit, hdist, repeat, prev;
 
         REFILL(14);
         hlit  = (bs.bits & 0x1F) + 257;
@@ -333,10 +333,9 @@ infl(defl_stream_t * __restrict stream) {
 
         while (i < n) {
           REFILL(14);
-          sym = huff_decode_lsb(&tcodelen, bs.bits, 7, &used);
-          fe  = tcodelen.fast[(uint8_t)bs.bits];
 
-          if (unlikely(!fe.len || !used || sym > 18)) goto err;
+          fe = tcodelen.fast[(uint8_t)bs.bits];
+          if (unlikely(!fe.len || fe.sym > 18)) goto err;
           CONSUME(fe.len);
 
           switch (fe.sym) {
