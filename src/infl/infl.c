@@ -304,9 +304,10 @@ infl(defl_stream_t * __restrict stream) {
           uint_fast8_t codelens[MAX_CODELEN_CODES];
           uint_fast8_t lens[MAX_LITLEN_CODES + MAX_DIST_CODES];
         } lens={0};
-        huff_table_t     tcodelen;
-        huff_table_ext_t dyn_tlen, dyn_tdist;
-        int              i, n, sym, hclen, hlit, hdist, repeat, prev;
+        huff_table_t      tcodelen;
+        huff_table_ext_t  dyn_tlen, dyn_tdist;
+        huff_fast_entry_t fe;
+        int               i, n, sym, hclen, hlit, hdist, repeat, prev;
 
         REFILL(14);
         hlit  = (bs.bits & 0x1F) + 257;
@@ -332,18 +333,17 @@ infl(defl_stream_t * __restrict stream) {
 
         while (i < n) {
           REFILL(14);
-          sym = huff_decode_lsb(&tcodelen, bs.bits, 15, &used);
-          if (!used || sym > 18) goto err;
-          CONSUME(used);
+          sym = huff_decode_lsb(&tcodelen, bs.bits, 7, &used);
+          fe  = tcodelen.fast[(uint8_t)bs.bits];
 
-          switch (sym) {
-            default: {
-              lens.lens[i++] = sym; /* sym <= 15 */
-            } break;
+          if (unlikely(!fe.len || !used || sym > 18)) goto err;
+          CONSUME(fe.len);
+
+          switch (fe.sym) {
+            default: lens.lens[i++] = fe.sym; break; /* sym is <= 15 */
             case 16: {
               repeat = 3 + (bs.bits & 0x3); CONSUME(2);
-              if (i == 0 || i + repeat > n)
-                goto err;
+              if (i == 0 || i + repeat > n) goto err;
               prev = lens.lens[i - 1];
               while (repeat--) lens.lens[i++] = prev;
             } break;
