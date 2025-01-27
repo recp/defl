@@ -334,7 +334,7 @@ infl(defl_stream_t * __restrict stream) {
         for (i = MAX_CODELEN_CODES-1; i; i--) lens.codelens[i] = 0;
 
         while (i < n) {
-          REFILL(15);
+          REFILL(14);
           sym = huff_decode_lsb(&tcodelen, bs.bits, 15, &used);
           if (!used || sym > 18) goto err;
           CONSUME(used);
@@ -344,36 +344,14 @@ infl(defl_stream_t * __restrict stream) {
               lens.lens[i++] = sym; /* sym <= 15 */
             } break;
             case 16: {
-              REFILL(2);
-              repeat = 3 + (bs.bits & 0x3);
-              CONSUME(2);
-
+              repeat = 3 + (bs.bits & 0x3); CONSUME(2);
               if (i == 0 || i + repeat > n)
                 goto err;
-
               prev = lens.lens[i - 1];
               while (repeat--) lens.lens[i++] = prev;
             } break;
-            case  17: {
-              REFILL(3);
-              repeat = 3 + (bs.bits & 0x7);
-              CONSUME(3);
-
-              if (i + repeat > n)
-                goto err;
-
-              while (repeat--) lens.lens[i++] = 0;
-            } break;
-            case 18: {
-              REFILL(7);
-              repeat = 11 + (bs.bits & 0x7F);
-              CONSUME(7);
-
-              if (i + repeat > n)
-                goto err;
-
-              while (repeat--) lens.lens[i++] = 0;
-            } break;
+            case 17: i+=(3  + (bs.bits & 0x7));  CONSUME(3); break;
+            case 18: i+=(11 + (bs.bits & 0x7F)); CONSUME(7); break;
           }
         }
 
