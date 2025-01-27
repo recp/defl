@@ -205,7 +205,7 @@ infl(defl_stream_t * __restrict stream) {
   static bool         _init=false;
 
   unz__bitstate_t bs;
-  uint_fast8_t    used, btype, bfinal = 0;
+  uint_fast8_t    btype, bfinal = 0;
 
   if (!stream->bs.chunk && !(stream->bs.chunk = stream->start)) {
     return UNZ_NOOP;
