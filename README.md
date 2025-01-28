@@ -4,10 +4,13 @@ A high-performance, small DEFLATE/ZLIB decompression implementation in C. Optimi
 
 - 📌 To get best performance try to compile sources directly into project instead of external linking
 - 📌 Feel free to report any bugs security issues by opening an issue
+- 📌 Any performance improvements are welcome!
 
 ---
 
-I'm using `defl` at [im](https://github.xom/recp/im) project to decode PNG IDATs. The main goal of the project is to allow decode IDATs without joining them. The size of IDATs may vary, for instance lot of 1byte IDAT may exist. So in this case a hybrid approach could be benefical to reduce memory usage while increase performance a bit. The hybrid approach ( joining small data and use chunks for large data ) may be provided by this project or by im or unz. **delf** also used in [unz](https://github.com/recp/unz) which is an another unzipping / compression library (WIP). 
+I'm using `defl` at [im](https://github.xom/recp/im) project to decode PNG IDATs. **The main goal of the project is** to allow decode IDATs without joining them. The size of IDATs may vary, for instance lot of 1byte IDAT may exist. So in this case a hybrid approach could be benefical to reduce memory usage while increase performance a bit. The hybrid approach ( joining small data and use chunks for large data ) may be provided by this project or by im or unz. **delf** also used in [unz](https://github.com/recp/unz) which is an another unzipping / compression library (WIP). 
+
+🚨 Don't use this in production until tests are ready
 
 ### Design
 
@@ -92,8 +95,10 @@ if (!infl_buf(src, srclen, dst, dstlen 1)) {
 ## TODO
 
 - [x] implement inflate
+  - [ ] implement inflate stream
 - [ ] implement deflate
 - [ ] tests
+- [ ] build
 
 ## 🔨 Build
 
