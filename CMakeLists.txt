@@ -57,6 +57,7 @@ include(GNUInstallDirs)
 add_subdirectory(deps/huff)
 
 add_library(defl
+    src/infl/mem.c
     src/infl/infl.c
 )
 

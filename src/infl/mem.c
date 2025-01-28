@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-#include "common.h"
+#include "../common.h"
 #include "../include/defl/infl.h"
 
 UNZ_EXPORT
