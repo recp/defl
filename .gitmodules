@@ -1,0 +1,3 @@
+[submodule "deps/huff"]
+	path = deps/huff
+	url = https://recp@github.com/recp/huff.git
