@@ -15,7 +15,7 @@
  */
 
 #include "../common.h"
-#include "../include/defl/infl.h"
+#include "../../include/defl/infl.h"
 
 UNZ_EXPORT
 void
