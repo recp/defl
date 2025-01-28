@@ -304,7 +304,7 @@ infl(defl_stream_t * __restrict stream) {
           uint_fast8_t codelens[MAX_CODELEN_CODES];
           uint_fast8_t lens[MAX_LITLEN_CODES + MAX_DIST_CODES];
         } lens={0};
-        huff_table_t      tcodelen;
+        huff_fast_entry_t tcodelen[HUFF_FAST_TABLE_SIZE];
         huff_table_ext_t  dyn_tlen, dyn_tdist;
         huff_fast_entry_t fe;
         int               i, n, hclen, hlit, hdist, repeat, prev;
@@ -325,7 +325,7 @@ infl(defl_stream_t * __restrict stream) {
           CONSUME(3);
         }
 
-        if (!huff_init_fast_lsb(&tcodelen, lens.codelens, NULL, MAX_CODELEN_CODES))
+        if (!huff_init_fast_lsb(tcodelen, lens.codelens, NULL, MAX_CODELEN_CODES))
           goto err;
 
         /* clean used union prefix then ensure i=0 after loop exit */
@@ -334,7 +334,7 @@ infl(defl_stream_t * __restrict stream) {
         while (i < n) {
           REFILL(14);
 
-          fe = tcodelen.fast[(uint8_t)bs.bits];
+          fe = tcodelen[(uint8_t)bs.bits];
           if (unlikely(!fe.len || fe.sym > 18)) goto err;
           CONSUME(fe.len);
 
