@@ -22,6 +22,37 @@ if(GIT_FOUND AND EXISTS "${PROJECT_SOURCE_DIR}/.git")
     endif()
 endif()
 
+if(MSVC)
+  add_definitions(-D_WINDOWS -D_USRDLL)
+
+  if(NOT CMAKE_BUILD_TYPE MATCHES Debug)
+    add_definitions(-DNDEBUG)
+    add_compile_options(/W3 /Ox /Gy /Oi /TC)
+    foreach(flag_var
+        CMAKE_C_FLAGS CMAKE_C_FLAGS_DEBUG CMAKE_C_FLAGS_RELEASE
+        CMAKE_C_FLAGS_MINSIZEREL CMAKE_C_FLAGS_RELWITHDEBINFO)
+      string(REGEX REPLACE "/RTC(su|[1su])" "" ${flag_var} "${${flag_var}}")
+    endforeach(flag_var)
+  endif()
+else()
+  add_compile_options(-Wall)
+
+  if(NOT CMAKE_BUILD_TYPE MATCHES Debug)
+    add_compile_options(-O3)
+  endif()
+endif()
+
+get_directory_property(hasParent PARENT_DIRECTORY)
+
+if(NOT hasParent AND NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
+  message(STATUS "Setting build type to '${DEFAULT_BUILD_TYPE}' as none was specified.")
+  set(CMAKE_BUILD_TYPE "${DEFAULT_BUILD_TYPE}" CACHE STRING "Choose the type of build." FORCE)
+  # Set the possible values of build type for cmake-gui
+  set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS "Debug" "Release" "MinSizeRel" "RelWithDebInfo")
+endif()
+
+include(GNUInstallDirs)
+
 # huff package
 add_subdirectory(deps/huff)
 
@@ -29,7 +60,15 @@ add_library(defl
     src/infl/infl.c
 )
 
-include(GNUInstallDirs)
+set_target_properties(${PROJECT_NAME} PROPERTIES
+                              VERSION ${PROJECT_VERSION} 
+                            SOVERSION ${PROJECT_VERSION_MAJOR})
+
+if(WIN32)
+  # Because SOVERSION has no effect to file naming on Windows
+  set_target_properties(${PROJECT_NAME} PROPERTIES
+    RUNTIME_OUTPUT_NAME ${PROJECT_NAME}-${PROJECT_VERSION_MAJOR})
+endif()
 
 target_include_directories(defl
     PUBLIC
@@ -40,7 +79,7 @@ target_include_directories(defl
 )
 
 target_link_libraries(defl
-    PUBLIC huff::huff
+    PUBLIC huff
 )
 
 install(TARGETS defl
