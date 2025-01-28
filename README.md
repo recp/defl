@@ -99,6 +99,7 @@ if (!infl_buf(src, srclen, dst, dstlen 1)) {
 - [ ] implement deflate
 - [ ] tests
 - [ ] build
+- [ ] documentation
 
 ## 🔨 Build
 
