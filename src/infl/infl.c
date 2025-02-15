@@ -222,7 +222,7 @@ infl(defl_stream_t * __restrict stream) {
     _init = true;
   }
 
-  if (unlikely(!stream->header)) {
+  if (stream->flags == 1 && unlikely(!stream->header)) {
     zlib_header(stream, &stream->bs.chunk, true);
   }
 
@@ -398,6 +398,7 @@ infl_init(const void * __restrict dst, uint32_t dstlen, int flags) {
   st->malloc  = malloc;
   st->realloc = realloc;
   st->free    = free;
+  st->flags   = flags;
 
   return st;
 }

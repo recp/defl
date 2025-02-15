@@ -78,6 +78,7 @@ struct unz__stream_t {
   uint32_t       dstlen;
   size_t         dstpos;
   size_t         srclen; /* sum_of(chunk->len)  */
+  int            flags;
 
   unz__bitstate_t bs;
 };
