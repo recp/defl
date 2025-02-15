@@ -54,7 +54,9 @@ endif()
 include(GNUInstallDirs)
 
 # huff package
-add_subdirectory(deps/huff)
+if(NOT TARGET huff)
+  add_subdirectory(deps/huff EXCLUDE_FROM_ALL)
+endif()
 
 add_library(defl
     src/infl/mem.c
