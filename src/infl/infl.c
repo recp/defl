@@ -49,7 +49,6 @@ static const uint_fast8_t
   f_ldist[32]  = {[0 ...31]=5}
 ;
 
-UNZ_INLINE uint_fast16_t min16(uint_fast16_t a, uint_fast16_t b) { return a < b ? a : b; }
 UNZ_INLINE int min(int a, int b) { return a < b ? a : b; }
 
 #define EXTRACT(B,C)  ((B) & (((bitstream_t)1 << (C)) - 1))
@@ -216,8 +215,8 @@ infl(defl_stream_t * __restrict stream) {
 
   /* initilize static tables */
   if (!_init) {
-    if (!huff_init_lsb_extof(&_tlitl, f_llitl, NULL, lvals, 257, 29) ||
-        !huff_init_lsb_ext(&_tdist, f_ldist, NULL, dvals, 30)) {
+    if (!huff_init_lsb_extof(&_tlitl, f_llitl, NULL, lvals, 257, 288) ||
+        !huff_init_lsb_ext(&_tdist, f_ldist, NULL, dvals, 32)) {
       return UNZ_ERR;
     }
     _init = true;
