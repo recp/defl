@@ -62,7 +62,7 @@ UNZ_INLINE int min(int a, int b) { return a < b ? a : b; }
 
 #define REFILL(req)                                                           \
   while (bs.nbits < (req)) {                                                  \
-    int shr;                                                                  \
+    int take;                                                                 \
     if (!bs.npbits) {                                                         \
       if (unlikely((bs.chunk->p >= bs.chunk->end)                             \
           && (!(bs.chunk = bs.chunk->next) || !bs.chunk->p)))                 \
@@ -71,13 +71,16 @@ UNZ_INLINE int min(int a, int b) { return a < b ? a : b; }
                            &bs.npbits, bs.chunk->end);                        \
       if (unlikely(!bs.npbits)) return UNZ_ERR;                               \
     }                                                                         \
-                                                                              \
-    bs.bits   |= (bs.pbits&BITS_MASKMSBI) << bs.nbits;                        \
-    shr        = min(min(BITS_SZF-bs.nbits,bs.npbits),BITS_MSBI);             \
-                                                                              \
-    bs.pbits >>= shr;                                                         \
-    bs.nbits  += shr;                                                         \
-    bs.npbits -= shr;                                                         \
+    take = min(64 - bs.nbits, bs.npbits);                                     \
+    if (take == 64) {                                                         \
+      bs.bits    = bs.pbits;                                                  \
+      bs.pbits   = 0;                                                         \
+    } else if (take) {                                                        \
+      bs.bits   |= (bs.pbits & ((1ULL << take) - 1)) << bs.nbits;             \
+      bs.pbits >>= take;                                                      \
+    }                                                                         \
+    bs.nbits  += take;                                                        \
+    bs.npbits -= take;                                                        \
   }
 
 static inline
