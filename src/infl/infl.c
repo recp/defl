@@ -243,7 +243,7 @@ infl(defl_stream_t * __restrict stream) {
 
         dpos    = stream->dstpos;
         dlen    = stream->dstlen;
-        padbits = bs.nbits % 8;
+        padbits = (bs.npbits + bs.nbits) % 8;
         if (padbits > 0)
           CONSUME(padbits);
 
