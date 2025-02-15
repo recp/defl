@@ -253,27 +253,30 @@ infl(defl_stream_t * __restrict stream) {
 
         if (unlikely(len != (uint16_t)~nlen)) { goto err; } /* invalid block */
 
+        remlen = len;
+
         /* flush cached bits (bst.bits) to the output buffer */
-        while (bs.nbits >= 8) {
+        while (bs.nbits >= 8 && remlen > 0) {
           cached = EXTRACT(bs.bits, 8);
           /* output buffer overflow */
           if (dpos >= dlen) { goto err; }
           stream->dst[dpos++] = cached;
           CONSUME(8);
+          remlen--;
         }
 
         /* flush remaining bits in bst.pbits to the output buffer */
-        while (bs.npbits >= 8) {
+        while (bs.npbits >= 8 && remlen > 0) {
           cached = EXTRACT(bs.pbits, 8);
           /* output buffer overflow */
           if (dpos >= dlen) { goto err; }
           stream->dst[dpos++] = cached;
           bs.pbits >>= 8;
           bs.npbits -= 8;
+          remlen--;
         }
 
-        /* copy LEN bytes of literal data, handling multiple chunks */
-        remlen = len;
+        /* copy remaining bytes of literal data, handling multiple chunks */
         while (remlen > 0) {
           if ((chunkrem = bs.chunk->end - bs.chunk->p) == 0) {
             /* invalid stream or insufficient data */
