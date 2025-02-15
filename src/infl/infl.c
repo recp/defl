@@ -237,9 +237,9 @@ infl(defl_stream_t * __restrict stream) {
 
     switch (btype) {
       case 0: {
-        size_t        remlen, chunkrem, dpos, dlen;
-        uint_fast16_t len, nlen, padbits, n;
-        uint_fast8_t  cached;
+        size_t       dpos, dlen, chunkrem;
+        int          remlen, len, nlen, padbits, n;
+        uint_fast8_t cached;
 
         dpos    = stream->dstpos;
         dlen    = stream->dstlen;
@@ -285,7 +285,7 @@ infl(defl_stream_t * __restrict stream) {
           }
 
           /* validate output buffer overflow */
-          n = min16(chunkrem, remlen);
+          n = min((int)chunkrem, remlen);
           if (dpos + n > dlen) { goto err; }
 
           /* copy data */
