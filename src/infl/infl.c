@@ -103,7 +103,7 @@ infl_block(defl_stream_t        * __restrict stream,
 
   while (true) {
     /* decode literal/length symbol */
-    REFILL(32);
+    REFILL(21);
     lsym = huff_decode_lsb_extof(tlit, bs.bits, &used, &len, 257);
     if (!used || lsym > 285)
       return UNZ_ERR; /* invalid symbol */
@@ -121,8 +121,10 @@ infl_block(defl_stream_t        * __restrict stream,
       break;
     }
 
-    /* validate distance */
+    REFILL(29);
     dist = huff_decode_lsb_ext(tdist, bs.bits, &used);
+
+    /* validate distance */
     if (unlikely(!used || dist > dpos))
       return UNZ_ERR;
     CONSUME(used);
