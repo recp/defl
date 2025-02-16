@@ -56,30 +56,29 @@ UNZ_INLINE int min(int a, int b) { return a < b ? a : b; }
 #define RESTORE()     bs=stream->bs;
 #define DONATE()      stream->bs=bs;bs.bits=0;bs.nbits=0;bs.npbits=0;bs.pbits=0;bs.chunk=NULL;
 
-#define BITS_MSBI     (BITS_SZF-1)
-#define BITS_MASKMSBI ((1ULL << BITS_MSBI) - 1)
-
 #define REFILL(req)                                                           \
   while (bs.nbits < (req)) {                                                  \
     int take;                                                                 \
     if (!bs.npbits) {                                                         \
       if (unlikely((bs.chunk->p >= bs.chunk->end)                             \
-          && (!(bs.chunk = bs.chunk->next) || !bs.chunk->p)))                 \
-        return UNZ_ERR;                                                       \
+         && (!(bs.chunk = bs.chunk->next) || !bs.chunk->p))) {                \
+        if(bs.nbits)break;else return UNZ_ERR;                                \
+      }                                                                       \
       bs.pbits = huff_read(&bs.chunk->p, &bs.chunk->bitpos,                   \
                            &bs.npbits, bs.chunk->end);                        \
       if (unlikely(!bs.npbits)) return UNZ_ERR;                               \
     }                                                                         \
-    take = min(64 - bs.nbits, bs.npbits);                                     \
-    if (take == 64) {                                                         \
+    if (!bs.nbits) {                                                          \
       bs.bits    = bs.pbits;                                                  \
+      bs.nbits   = bs.npbits;                                                 \
       bs.pbits   = 0;                                                         \
-    } else if (take) {                                                        \
-      bs.bits   |= (bs.pbits & ((1ULL << take) - 1)) << bs.nbits;             \
+      bs.npbits  = 0;                                                         \
+    } else if ((take = min(64 - bs.nbits, bs.npbits))) {                      \
+      bs.bits   |= (bs.pbits&(((bitstream_t)1<<take)-1)) << bs.nbits;         \
       bs.pbits >>= take;                                                      \
+      bs.nbits  += take;                                                      \
+      bs.npbits -= take;                                                      \
     }                                                                         \
-    bs.nbits  += take;                                                        \
-    bs.npbits -= take;                                                        \
   }
 
 static inline
