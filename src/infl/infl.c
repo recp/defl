@@ -57,7 +57,7 @@ UNZ_INLINE int min(int a, int b) { return a < b ? a : b; }
 #define DONATE()      stream->bs=bs;bs.bits=0;bs.nbits=0;bs.npbits=0;bs.pbits=0;bs.chunk=NULL;
 
 #define REFILL(req)                                                           \
-  while (bs.nbits < (req)) {                                                  \
+  while (bs.nbits < (req) && (bs.p || bs.npbits || bs.chunk)) {               \
     int take;                                                                 \
     if (!bs.npbits) {                                                         \
       if (unlikely(!bs.p&&(!bs.chunk||!(bs.chunk=bs.chunk->next)||!(bs.p=bs.chunk->p)))){\
