@@ -112,11 +112,11 @@ infl_block(defl_stream_t        * __restrict stream,
 
     if (lsym < 256) {
       /* literal byte */
-      if (dpos >= dst_cap)
+      if (unlikely(dpos >= dst_cap))
         return UNZ_EFULL;
       dst[dpos++] = (uint8_t)lsym;
       continue;
-    } else if (lsym == 256) {
+    } else if (unlikely(lsym == 256)) {
       /* eof */
       break;
     }
