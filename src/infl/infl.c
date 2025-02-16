@@ -60,12 +60,10 @@ UNZ_INLINE int min(int a, int b) { return a < b ? a : b; }
   while (bs.nbits < (req)) {                                                  \
     int take;                                                                 \
     if (!bs.npbits) {                                                         \
-      if (unlikely((bs.chunk->p >= bs.chunk->end)                             \
-         && (!(bs.chunk = bs.chunk->next) || !bs.chunk->p))) {                \
+      if (unlikely(!bs.p&&(!(bs.chunk=bs.chunk->next)||!(bs.p=bs.chunk->p)))){\
         if(bs.nbits)break;else return UNZ_ERR;                                \
       }                                                                       \
-      bs.pbits = huff_read(&bs.chunk->p, &bs.chunk->bitpos,                   \
-                           &bs.npbits, bs.chunk->end);                        \
+      bs.pbits = huff_read(&bs.p,&bs.chunk->bitpos,&bs.npbits,bs.chunk->end); \
       if (unlikely(!bs.npbits)) return UNZ_ERR;                               \
     }                                                                         \
     if (!bs.nbits) {                                                          \
@@ -228,6 +226,7 @@ infl(defl_stream_t * __restrict stream) {
   }
 
   RESTORE();
+  bs.p = bs.chunk->p;
 
   while (!bfinal && bs.chunk) {
     REFILL(3);
