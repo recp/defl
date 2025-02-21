@@ -54,30 +54,101 @@ UNZ_INLINE int min(int a, int b) { return a < b ? a : b; }
 #define EXTRACT(B,C)  ((B) & (((bitstream_t)1 << (C)) - 1))
 #define CONSUME(N)    bs.bits >>= (N);bs.nbits -= (N);
 #define RESTORE()     bs=stream->bs;
-#define DONATE()      stream->bs=bs;bs.bits=0;bs.nbits=0;bs.npbits=0;bs.pbits=0;bs.chunk=NULL;
+#define DONATE()      stream->bs=bs;
 
 #define REFILL(req)                                                           \
-  while (bs.nbits < (req) && (bs.p || bs.npbits || bs.chunk)) {               \
+  if (bs.nbits < (req)) {                                                     \
     int take;                                                                 \
-    if (!bs.npbits) {                                                         \
-      if (unlikely(!bs.p&&(!bs.chunk||!(bs.chunk=bs.chunk->next)||!(bs.p=bs.chunk->p)))){\
-        if(bs.nbits)break;else return UNZ_ERR;                                \
+    do {                                                                      \
+      if (!bs.nbits) {                                                        \
+        bs.bits    = bs.pbits;                                                \
+        bs.nbits   = bs.npbits;                                               \
+        bs.pbits   = 0;                                                       \
+        bs.npbits  = 0;                                                       \
+      } else if ((take = min(64 - bs.nbits, bs.npbits))) {                    \
+        bs.bits   |= (bs.pbits&(((bitstream_t)1<<take)-1)) << bs.nbits;       \
+        bs.pbits >>= take;                                                    \
+        bs.nbits  += take;                                                    \
+        bs.npbits -= take;                                                    \
       }                                                                       \
-      bs.pbits = huff_read(&bs.p,&bs.chunk->bitpos,&bs.npbits,bs.chunk->end); \
-      if (unlikely(!bs.npbits)) return UNZ_ERR;                               \
-    }                                                                         \
-    if (!bs.nbits) {                                                          \
-      bs.bits    = bs.pbits;                                                  \
-      bs.nbits   = bs.npbits;                                                 \
-      bs.pbits   = 0;                                                         \
-      bs.npbits  = 0;                                                         \
-    } else if ((take = min(64 - bs.nbits, bs.npbits))) {                      \
+      if (!bs.npbits) {                                                       \
+        if (bs.p > bs.end                                                     \
+            && (!(bs.chunk = bs.chunk->next)                                  \
+                || !(bs.p = bs.chunk->p) || !(bs.end = bs.chunk->end))) {     \
+          if(bs.nbits)break;else return UNZ_ERR;                              \
+        }                                                                     \
+        bs.npbits=huff_read(&bs.p,&bs.pbits,bs.end);                          \
+      }                                                                       \
+    } while (bs.nbits < (req) && bs.npbits);                                  \
+  }
+
+#if 0
+#define REFILL(req)                                                           \
+  if (bs.nbits < (req)) {                                                     \
+    int take;                                                                 \
+    do {                                                                      \
+      take       = min(56-bs.nbits, bs.npbits);                               \
       bs.bits   |= (bs.pbits&(((bitstream_t)1<<take)-1)) << bs.nbits;         \
       bs.pbits >>= take;                                                      \
       bs.nbits  += take;                                                      \
       bs.npbits -= take;                                                      \
-    }                                                                         \
+      if (!bs.npbits) {                                                       \
+        if (bs.p > bs.end                                                     \
+            && (!(bs.chunk = bs.chunk->next)                                  \
+                || !(bs.p = bs.chunk->p) || !(bs.end = bs.chunk->end))) {     \
+          if(bs.nbits)break;else return UNZ_ERR;                              \
+        }                                                                     \
+        bs.npbits=huff_read(&bs.p,&bs.pbits,bs.end);                          \
+      }                                                                       \
+    } while (bs.nbits < (req) && bs.npbits);                                  \
   }
+#endif
+
+#if 0
+/**
+ * dont require more than 56bits to reduce 64bit shift and partial bits
+ */
+#define REFILL(req) do {                                                      \
+  int take, s, i;                                                             \
+  if (bs.nbits < (req)) {                                                     \
+    s          = bs.nbits;                                                    \
+    take       = min(56-s,bs.npbits);                                         \
+    bs.bits   |= (bs.pbits & (((bitstream_t)1<<take)-1)) << s;                \
+    bs.pbits >>= take;                                                        \
+    s         += take;                                                        \
+    bs.npbits -= take;                                                        \
+                                                                              \
+    /* we still need bits, fill both buffers. we dont allow a chunk to be */  \
+    /* less than 2x word size, so two iter would be enough to fill a      */  \
+    /* buff e.g. we are end of one chunk then switch to next              */  \
+    if (unlikely((req) > s)) {                                                \
+      /* front buff: first try */                                             \
+      take = min((int)(bs.end - bs.p),(56-s)/8);                              \
+      for (i=0;i<take;i++,s+=8) bs.bits |= ((BITS_TYPE)bs.p[i]) << s;         \
+      bs.p += take;                                                           \
+                                                                              \
+      if (bs.p > bs.end                                                       \
+          && (!(bs.chunk = bs.chunk->next)                                    \
+               || !(bs.p = bs.chunk->p) || !(bs.end = bs.chunk->end))) {      \
+        bs.nbits = s;                                                         \
+        break;                                                                \
+      }                                                                       \
+                                                                              \
+      /* front buff: second try */                                            \
+      if ((req) > s) {                                                        \
+        take = min((int)(bs.end - bs.p),(56-s)/8);                            \
+        for (i=0;i<take;i++,s+=8) bs.bits |= ((BITS_TYPE)bs.p[i])<<s;         \
+        bs.p += take;                                                         \
+      }                                                                       \
+                                                                              \
+      /* back buff: full read */                                              \
+      if (unlikely(!(bs.npbits=huff_read(&bs.p,&bs.pbits,bs.end))))           \
+        break;                                                                \
+    }                                                                         \
+    bs.nbits = s;                                                             \
+  }                                                                           \
+} while(0)
+#endif
 
 static inline
 UnzResult
@@ -225,7 +296,8 @@ infl(defl_stream_t * __restrict stream) {
     zlib_header(stream, &stream->bs.chunk, true);
   }
 
-  stream->bs.p = stream->start->p;
+  stream->bs.p   = stream->start->p;
+  stream->bs.end = stream->start->end;
   RESTORE();
 
   while (!bfinal && bs.chunk) {

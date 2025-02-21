@@ -57,6 +57,7 @@ struct unz__chunk_t {
 typedef struct unz__bitstate_t {
   struct unz__chunk_t *chunk;
   const uint8_t       *p;
+  const uint8_t       *end;
   bitstream_t          pbits; /* back buff  */
   BITS_TYPE            bits;  /* front buff */
   int                  nbits;
