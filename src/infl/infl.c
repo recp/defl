@@ -57,6 +57,33 @@ UNZ_INLINE int min(int a, int b) { return a < b ? a : b; }
 #define DONATE()      stream->bs=bs;
 
 #define REFILL(req)                                                           \
+  if (unlikely(bs.nbits < (req))) {                                           \
+    int take;                                                                 \
+    do {                                                                      \
+      if ((take = min(64 - bs.nbits, bs.npbits)) != 64) {                     \
+        bs.bits   |= (bs.pbits&(((bitstream_t)1<<take)-1)) << bs.nbits;       \
+        bs.pbits >>= take;                                                    \
+        bs.nbits  += take;                                                    \
+        bs.npbits -= take;                                                    \
+      } else {                                                                \
+        bs.bits    = bs.pbits;                                                \
+        bs.nbits   = bs.npbits;                                               \
+        bs.pbits   = 0;                                                       \
+        bs.npbits  = 0;                                                       \
+      }                                                                       \
+      if (unlikely(!bs.npbits)) {                                             \
+        if (unlikely(bs.p > bs.end)                                           \
+            && (!(bs.chunk = bs.chunk->next)                                  \
+                || !(bs.p = bs.chunk->p) || !(bs.end = bs.chunk->end))) {     \
+          if(bs.nbits)break;else return UNZ_ERR;                              \
+        }                                                                     \
+        bs.npbits=huff_read(&bs.p,&bs.pbits,bs.end);                          \
+      }                                                                       \
+    } while (unlikely(bs.nbits < (req) && bs.npbits));                        \
+  }
+
+#if 0
+#define REFILL(req)                                                           \
   if (bs.nbits < (req)) {                                                     \
     int take;                                                                 \
     do {                                                                      \
@@ -81,6 +108,7 @@ UNZ_INLINE int min(int a, int b) { return a < b ? a : b; }
       }                                                                       \
     } while (bs.nbits < (req) && bs.npbits);                                  \
   }
+#endif
 
 #if 0
 #define REFILL(req)                                                           \
