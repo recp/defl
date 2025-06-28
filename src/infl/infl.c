@@ -434,7 +434,7 @@ infl(defl_stream_t * __restrict stream) {
           goto err;
 
         /* clean used union prefix then ensure i=0 after loop exit */
-        for (i = MAX_CODELEN_CODES-1; i; i--) lens.codelens[i] = 0;
+        for (i = MAX_LITLEN_CODES; i;) lens.codelens[--i] = 0;
 
         while (i < n) {
           REFILL(14);
