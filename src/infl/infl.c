@@ -72,10 +72,11 @@ UNZ_INLINE int min(int a, int b) { return a < b ? a : b; }
         bs.npbits  = 0;                                                       \
       }                                                                       \
       if (unlikely(!bs.npbits)) {                                             \
-        if (unlikely(bs.p > bs.end)                                           \
-            && (!(bs.chunk = bs.chunk->next)                                  \
-                || !(bs.p = bs.chunk->p) || !(bs.end = bs.chunk->end))) {     \
-          if(bs.nbits)break;else return UNZ_ERR;                              \
+        if (unlikely(bs.p > bs.end)) {                                        \
+          if (!bs.chunk || !(bs.chunk = bs.chunk->next)                       \
+              || !(bs.p = bs.chunk->p) || !(bs.end = bs.chunk->end)) {        \
+            if(bs.nbits)break;else return UNZ_ERR;                            \
+          }                                                                   \
         }                                                                     \
         bs.npbits=huff_read(&bs.p,&bs.pbits,bs.end);                          \
       }                                                                       \
