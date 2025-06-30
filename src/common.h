@@ -60,8 +60,8 @@ typedef struct unz__bitstate_t {
   const uint8_t       *end;
   bitstream_t          pbits; /* back buff  */
   BITS_TYPE            bits;  /* front buff */
-  int                  nbits;
-  int                  npbits;
+  unsigned             nbits;
+  unsigned             npbits;
 } unz__bitstate_t;
 
 struct unz__stream_t {
