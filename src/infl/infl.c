@@ -306,16 +306,16 @@ infl_block(defl_stream_t        * __restrict stream,
 __attribute__((hot, always_inline))
 static inline UnzResult
 infl_raw(defl_stream_t * __restrict stream) {
-  uint8_t       *dstptr;
-  const uint8_t *srcptr;
+  uint8_t        *dst;
+  const uint8_t  *p;
   unz__bitstate_t bs;
-  unsigned       dpos, dlen, nbytes, chunkrem, n, remlen, i, simd_len;
-  uint16_t       len, nlen;
-  uint32_t       header, val;
+  unsigned        dpos, dlen, nbytes, chkrem, n, remlen, i, simdlen;
+  uint32_t        header, val;
+  uint16_t        len, nlen;
 
   dpos = (unsigned)stream->dstpos;
   dlen = stream->dstlen;
-  (void)simd_len; /* suppress unused warn */
+  (void)simdlen; /* suppress unused warn */
 
   RESTORE();
 
@@ -337,7 +337,7 @@ infl_raw(defl_stream_t * __restrict stream) {
     return UNZ_ERR;
 
   remlen = len;
-  dstptr = stream->dst + dpos;
+  dst    = stream->dst + dpos;
 
   /* flush bs.bits */
   nbytes = bs.nbits >> 3;
@@ -346,18 +346,18 @@ infl_raw(defl_stream_t * __restrict stream) {
     if (nbytes <= 4) {
       val = (uint32_t)bs.bits;
       switch (nbytes) {
-        case 4: dstptr[3] = (uint8_t)(val >> 24);
-        case 3: dstptr[2] = (uint8_t)(val >> 16);
-        case 2: dstptr[1] = (uint8_t)(val >> 8);
-        case 1: dstptr[0] = (uint8_t)val;
+        case 4: dst[3] = (uint8_t)(val >> 24);
+        case 3: dst[2] = (uint8_t)(val >> 16);
+        case 2: dst[1] = (uint8_t)(val >> 8);
+        case 1: dst[0] = (uint8_t)val;
       }
     } else {
-      for (size_t i = 0; i < nbytes; i++)
-        dstptr[i] = (uint8_t)(bs.bits >> (i << 3));
+      for (i = 0; i < nbytes; i++)
+        dst[i] = (uint8_t)(bs.bits >> (i << 3));
     }
     bs.bits >>= (nbytes << 3);
     bs.nbits -= (int)(nbytes << 3);
-    dstptr   += nbytes;
+    dst      += nbytes;
     remlen   -= nbytes;
   }
 
@@ -366,11 +366,11 @@ infl_raw(defl_stream_t * __restrict stream) {
   if (nbytes > 0 && remlen > 0) {
     nbytes = (nbytes < remlen) ? nbytes : remlen;
     for (i = 0; i < nbytes; i++) {
-      dstptr[i] = (uint8_t)(bs.pbits >> (i << 3));
+      dst[i] = (uint8_t)(bs.pbits >> (i << 3));
     }
     bs.pbits >>= (nbytes << 3);
     bs.npbits -= (int)(nbytes << 3);
-    dstptr    += nbytes;
+    dst       += nbytes;
     remlen    -= nbytes;
   }
 
@@ -382,40 +382,40 @@ infl_raw(defl_stream_t * __restrict stream) {
       bs.end = bs.chunk->end;
     }
 
-    srcptr   = bs.p;
-    chunkrem = (unsigned)(size_t)(bs.end - srcptr);
+    p      = bs.p;
+    chkrem = (unsigned)(size_t)(bs.end - p);
 
-    if (likely(chunkrem > 0)) {
-      n = (chunkrem < remlen) ? chunkrem : remlen;
+    if (likely(chkrem > 0)) {
+      n = (chkrem < remlen) ? chkrem : remlen;
 
 #if defined(__builtin_prefetch)
       if (n >= 256) {
-        __builtin_prefetch(srcptr + 64, 0, 0);
+        __builtin_prefetch(p + 64, 0, 0);
       }
 #endif
 
 #if defined(__ARM_NEON) || defined(__ARM_NEON__)
       if (n >= 64) {
-        simd_len = n & ~15UL;
-        for (i = 0; i < simd_len; i += 16) {
-          vst1q_u8(dstptr + i, vld1q_u8(srcptr + i));
+        simdlen = n & ~15UL;
+        for (i = 0; i < simdlen; i += 16) {
+          vst1q_u8(dst + i, vld1q_u8(p + i));
         }
-        srcptr += simd_len;
-        dstptr += simd_len;
-        remlen -= simd_len;
-        n      -= simd_len;
+        p      += simdlen;
+        dst    += simdlen;
+        remlen -= simdlen;
+        n      -= simdlen;
       }
 #elif defined(__AVX2__)
       if (n >= 64) {
-        simd_len = n & ~31UL;
-        for (i = 0; i < simd_len; i += 32) {
-          _mm256_storeu_si256((__m256i*)(dstptr + i),
-                              _mm256_loadu_si256((__m256i*)(srcptr + i)));
+        simdlen = n & ~31UL;
+        for (i = 0; i < simdlen; i += 32) {
+          _mm256_storeu_si256((__m256i*)(dst + i),
+                              _mm256_loadu_si256((__m256i*)(p + i)));
         }
-        srcptr += simd_len;
-        dstptr += simd_len;
-        remlen -= simd_len;
-        n -= simd_len;
+        p      += simdlen;
+        dst    += simdlen;
+        remlen -= simdlen;
+        n      -= simdlen;
       }
 #endif
       /* copy remaining bytes */
@@ -423,27 +423,26 @@ infl_raw(defl_stream_t * __restrict stream) {
         i = 0;
 
         /* check if both pointers are 8-byte aligned for fast copy */
-        if (((uintptr_t)srcptr & 7) == 0 && ((uintptr_t)dstptr & 7) == 0) {
+        if (((uintptr_t)p&7) == 0 && ((uintptr_t)dst&7) == 0) {
           for (; i + 31 < n; i += 32) {
-            *(uint64_t*)(dstptr+i)    = *(uint64_t*)(srcptr+i);
-            *(uint64_t*)(dstptr+i+8)  = *(uint64_t*)(srcptr+i+8);
-            *(uint64_t*)(dstptr+i+16) = *(uint64_t*)(srcptr+i+16);
-            *(uint64_t*)(dstptr+i+24) = *(uint64_t*)(srcptr+i+24);
+            *(uint64_t*)(dst+i)    = *(uint64_t*)(p+i);
+            *(uint64_t*)(dst+i+8)  = *(uint64_t*)(p+i+8);
+            *(uint64_t*)(dst+i+16) = *(uint64_t*)(p+i+16);
+            *(uint64_t*)(dst+i+24) = *(uint64_t*)(p+i+24);
           }
 
           for (; i + 7 < n; i += 8)
-            *(uint64_t*)(dstptr + i) = *(uint64_t*)(srcptr + i);
+            *(uint64_t*)(dst + i) = *(uint64_t*)(p + i);
         }
         
         /* remaining bytes or unaligned case */
-        for (; i < n; i++) dstptr[i] = srcptr[i];
+        for (; i < n; i++) dst[i] = p[i];
         
-        srcptr += n;
-        dstptr += n;
+        p      += n;
+        dst    += n;
         remlen -= n;
       }
-
-      bs.p = srcptr;
+      bs.p = p;
     }
   }
 
