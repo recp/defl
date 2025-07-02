@@ -183,9 +183,9 @@ UNZ_INLINE int min(int a, int b) { return a < b ? a : b; }
 } while(0)
 #endif
 
-static inline
-UnzResult
-infl_block(defl_stream_t        * __restrict stream,
+__attribute__((hot, always_inline))
+static inline UnzResult
+infl_block(defl_stream_t          * __restrict stream,
            const huff_table_ext_t * __restrict tlit,
            const huff_table_ext_t * __restrict tdist) {
   uint8_t * __restrict dst;
