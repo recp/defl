@@ -305,12 +305,10 @@ infl_block(defl_stream_t        * __restrict stream,
 
 __attribute__((hot, always_inline))
 static inline UnzResult
-infl_raw(defl_stream_t * __restrict stream,
-         unz__bitstate_t * __restrict bsp) {
-#define bs (*bsp)
-
+infl_raw(defl_stream_t * __restrict stream) {
   uint8_t       *dstptr;
   const uint8_t *srcptr;
+  unz__bitstate_t bs;
   unsigned       dpos, dlen, nbytes, chunkrem, n, remlen, i, simd_len;
   uint16_t       len, nlen;
   uint32_t       header, val;
@@ -318,6 +316,8 @@ infl_raw(defl_stream_t * __restrict stream,
   dpos = (unsigned)stream->dstpos;
   dlen = stream->dstlen;
   (void)simd_len; /* suppress unused warn */
+
+  RESTORE();
 
   /* align to byte boundary */
   if (bs.nbits & 7) {
@@ -449,7 +449,8 @@ infl_raw(defl_stream_t * __restrict stream,
 
   stream->dstpos = dpos + len;
 
-#undef bs
+  DONATE();
+
   return UNZ_OK;
 }
 
@@ -491,13 +492,13 @@ infl(defl_stream_t * __restrict stream) {
 
     switch (btype) {
       case 0:
-        if (infl_raw(stream, &bs) != UNZ_OK) goto err;
-        continue;
+        DONATE();
+        if (infl_raw(stream) != UNZ_OK) goto err;
+        RESTORE();
+        break;
       case 1:
         DONATE();
-        if (infl_block(stream, &_tlitl, &_tdist) != UNZ_OK) {
-          goto err;
-        }
+        if (infl_block(stream, &_tlitl, &_tdist) != UNZ_OK) goto err;
         RESTORE();
         break;
       case 2: {
@@ -557,9 +558,7 @@ infl(defl_stream_t * __restrict stream) {
           goto err;
 
         DONATE();
-        if (infl_block(stream, &dyn_tlen, &dyn_tdist) != UNZ_OK) {
-          goto err;
-        }
+        if (infl_block(stream, &dyn_tlen, &dyn_tdist) != UNZ_OK) goto err;
         RESTORE();
       } break;
       default:
