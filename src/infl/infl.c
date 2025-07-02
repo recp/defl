@@ -24,6 +24,10 @@
 #  include <arm_neon.h>
 #endif
 
+#if defined(__AVX2__)
+#  include <immintrin.h>
+#endif
+
 #define MAX_CODELEN_CODES 19
 #define MAX_LITLEN_CODES  288
 #define MAX_DIST_CODES    32
@@ -299,6 +303,156 @@ infl_block(defl_stream_t        * __restrict stream,
   return UNZ_OK;
 }
 
+__attribute__((hot, always_inline))
+static inline UnzResult
+infl_raw(defl_stream_t * __restrict stream,
+         unz__bitstate_t * __restrict bsp) {
+#define bs (*bsp)
+
+  uint8_t       *dstptr;
+  const uint8_t *srcptr;
+  unsigned       dpos, dlen, nbytes, chunkrem, n, remlen, i, simd_len;
+  uint16_t       len, nlen;
+  uint32_t       header, val;
+
+  dpos = (unsigned)stream->dstpos;
+  dlen = stream->dstlen;
+  (void)simd_len; /* suppress unused warn */
+
+  /* align to byte boundary */
+  if (bs.nbits & 7) {
+    int shift = bs.nbits & 7;
+    bs.bits >>= shift;
+    bs.nbits -= shift;
+  }
+
+  REFILL(32);
+  header = (uint32_t)bs.bits;
+  CONSUME(32);
+  
+  len  = header & 0xFFFF;
+  nlen = header >> 16;
+
+  if (unlikely((len^(uint16_t)~nlen)|(dpos+len > dlen)))
+    return UNZ_ERR;
+
+  remlen = len;
+  dstptr = stream->dst + dpos;
+
+  /* flush bs.bits */
+  nbytes = bs.nbits >> 3;
+  if (nbytes > 0 && remlen > 0) {
+    nbytes = (nbytes < remlen) ? nbytes : remlen;
+    if (nbytes <= 4) {
+      val = (uint32_t)bs.bits;
+      switch (nbytes) {
+        case 4: dstptr[3] = (uint8_t)(val >> 24);
+        case 3: dstptr[2] = (uint8_t)(val >> 16);
+        case 2: dstptr[1] = (uint8_t)(val >> 8);
+        case 1: dstptr[0] = (uint8_t)val;
+      }
+    } else {
+      for (size_t i = 0; i < nbytes; i++)
+        dstptr[i] = (uint8_t)(bs.bits >> (i << 3));
+    }
+    bs.bits >>= (nbytes << 3);
+    bs.nbits -= (int)(nbytes << 3);
+    dstptr   += nbytes;
+    remlen   -= nbytes;
+  }
+
+  /* flush bs.pbits */
+  nbytes = bs.npbits >> 3;
+  if (nbytes > 0 && remlen > 0) {
+    nbytes = (nbytes < remlen) ? nbytes : remlen;
+    for (i = 0; i < nbytes; i++) {
+      dstptr[i] = (uint8_t)(bs.pbits >> (i << 3));
+    }
+    bs.pbits >>= (nbytes << 3);
+    bs.npbits -= (int)(nbytes << 3);
+    dstptr    += nbytes;
+    remlen    -= nbytes;
+  }
+
+  while (remlen > 0) {
+    if (bs.p >= bs.end) {
+      if (!(bs.chunk = bs.chunk->next) || !bs.chunk->p || !bs.chunk->end)
+        return UNZ_ERR;
+      bs.p   = bs.chunk->p;
+      bs.end = bs.chunk->end;
+    }
+
+    srcptr   = bs.p;
+    chunkrem = (unsigned)(size_t)(bs.end - srcptr);
+
+    if (likely(chunkrem > 0)) {
+      n = (chunkrem < remlen) ? chunkrem : remlen;
+
+#if defined(__builtin_prefetch)
+      if (n >= 256) {
+        __builtin_prefetch(srcptr + 64, 0, 0);
+      }
+#endif
+
+#if defined(__ARM_NEON) || defined(__ARM_NEON__)
+      if (n >= 64) {
+        simd_len = n & ~15UL;
+        for (i = 0; i < simd_len; i += 16) {
+          vst1q_u8(dstptr + i, vld1q_u8(srcptr + i));
+        }
+        srcptr += simd_len;
+        dstptr += simd_len;
+        remlen -= simd_len;
+        n      -= simd_len;
+      }
+#elif defined(__AVX2__)
+      if (n >= 64) {
+        simd_len = n & ~31UL;
+        for (i = 0; i < simd_len; i += 32) {
+          _mm256_storeu_si256((__m256i*)(dstptr + i),
+                              _mm256_loadu_si256((__m256i*)(srcptr + i)));
+        }
+        srcptr += simd_len;
+        dstptr += simd_len;
+        remlen -= simd_len;
+        n -= simd_len;
+      }
+#endif
+      /* copy remaining bytes */
+      if (n > 0) {
+        i = 0;
+
+        /* check if both pointers are 8-byte aligned for fast copy */
+        if (((uintptr_t)srcptr & 7) == 0 && ((uintptr_t)dstptr & 7) == 0) {
+          for (; i + 31 < n; i += 32) {
+            *(uint64_t*)(dstptr+i)    = *(uint64_t*)(srcptr+i);
+            *(uint64_t*)(dstptr+i+8)  = *(uint64_t*)(srcptr+i+8);
+            *(uint64_t*)(dstptr+i+16) = *(uint64_t*)(srcptr+i+16);
+            *(uint64_t*)(dstptr+i+24) = *(uint64_t*)(srcptr+i+24);
+          }
+
+          for (; i + 7 < n; i += 8)
+            *(uint64_t*)(dstptr + i) = *(uint64_t*)(srcptr + i);
+        }
+        
+        /* remaining bytes or unaligned case */
+        for (; i < n; i++) dstptr[i] = srcptr[i];
+        
+        srcptr += n;
+        dstptr += n;
+        remlen -= n;
+      }
+
+      bs.p = srcptr;
+    }
+  }
+
+  stream->dstpos = dpos + len;
+
+#undef bs
+  return UNZ_OK;
+}
+
 UNZ_EXPORT
 int
 infl(defl_stream_t * __restrict stream) {
@@ -336,68 +490,9 @@ infl(defl_stream_t * __restrict stream) {
     CONSUME(3);
 
     switch (btype) {
-      case 0: {
-        size_t       dpos, dlen, chunkrem;
-        int          remlen, len, nlen, padbits, n;
-        uint_fast8_t cached;
-
-        dpos    = stream->dstpos;
-        dlen    = stream->dstlen;
-        padbits = (bs.npbits + bs.nbits) % 8;
-        if (padbits > 0)
-          CONSUME(padbits);
-
-        REFILL(32);
-        len  = EXTRACT(bs.bits, 16); CONSUME(16);
-        nlen = EXTRACT(bs.bits, 16); CONSUME(16);
-
-        if (unlikely(len != (uint16_t)~nlen)) { goto err; } /* invalid block */
-
-        remlen = len;
-
-        /* flush cached bits (bst.bits) to the output buffer */
-        while (bs.nbits >= 8 && remlen > 0) {
-          cached = EXTRACT(bs.bits, 8);
-          /* output buffer overflow */
-          if (dpos >= dlen) { goto err; }
-          stream->dst[dpos++] = cached;
-          CONSUME(8);
-          remlen--;
-        }
-
-        /* flush remaining bits in bst.pbits to the output buffer */
-        while (bs.npbits >= 8 && remlen > 0) {
-          cached = EXTRACT(bs.pbits, 8);
-          /* output buffer overflow */
-          if (dpos >= dlen) { goto err; }
-          stream->dst[dpos++] = cached;
-          bs.pbits >>= 8;
-          bs.npbits -= 8;
-          remlen--;
-        }
-
-        /* copy remaining bytes of literal data, handling multiple chunks */
-        while (remlen > 0) {
-          if ((chunkrem = bs.chunk->end - bs.chunk->p) == 0) {
-            /* invalid stream or insufficient data */
-            if (!(bs.chunk = bs.chunk->next)|| !bs.chunk->p) { goto err; }
-            continue;
-          }
-
-          /* validate output buffer overflow */
-          n = min((int)chunkrem, remlen);
-          if (dpos + n > dlen) { goto err; }
-
-          /* copy data */
-          memcpy(stream->dst + dpos, bs.chunk->p, n);
-          dpos        += n;
-          bs.chunk->p += n;
-          remlen      -= n;
-        }
-
-        stream->dstpos = dpos;
-        // DONATE() /* TODO: reduce donate / restore */
-      } continue;
+      case 0:
+        if (infl_raw(stream, &bs) != UNZ_OK) goto err;
+        continue;
       case 1:
         DONATE();
         if (infl_block(stream, &_tlitl, &_tdist) != UNZ_OK) {
