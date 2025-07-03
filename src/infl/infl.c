@@ -491,12 +491,12 @@ infl(defl_stream_t * __restrict stream) {
     switch (btype) {
       case 0:
         DONATE();
-        if (infl_raw(stream) != UNZ_OK) goto err;
+        if (infl_raw(stream) < UNZ_OK) goto err;
         RESTORE();
         break;
       case 1:
         DONATE();
-        if (infl_block(stream, &_tlitl, &_tdist) != UNZ_OK) goto err;
+        if (infl_block(stream, &_tlitl, &_tdist) < UNZ_OK) goto err;
         RESTORE();
         break;
       case 2: {
