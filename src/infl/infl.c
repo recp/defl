@@ -182,8 +182,8 @@ UNZ_INLINE int min(int a, int b) { return a < b ? a : b; }
 } while(0)
 #endif
 
-__attribute__((hot, always_inline))
-static inline UnzResult
+static UNZ_HOT
+UnzResult
 infl_block(defl_stream_t          * __restrict stream,
            const huff_table_ext_t * __restrict tlit,
            const huff_table_ext_t * __restrict tdist) {
@@ -302,8 +302,8 @@ infl_block(defl_stream_t          * __restrict stream,
   return UNZ_OK;
 }
 
-__attribute__((hot, always_inline))
-static inline UnzResult
+static UNZ_HOT
+UnzResult
 infl_raw(defl_stream_t * __restrict stream) {
   uint8_t        *dst;
   const uint8_t  *p;

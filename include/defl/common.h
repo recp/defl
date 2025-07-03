@@ -59,11 +59,15 @@ extern "C" {
 #endif
 
 #if defined(_MSC_VER)
-#  define UNZ_INLINE   __forceinline
-#  define UNZ_ALIGN(X) __declspec(align(X))
+#  define UNZ_INLINE      __forceinline
+#  define UNZ_ALIGN(X)    __declspec(align(X))
+#  define UNZ_HOT
+#  define UNZ_HOT_INLINE  __forceinline
 #else
-#  define UNZ_ALIGN(X) __attribute((aligned(X)))
-#  define UNZ_INLINE   static inline __attribute((always_inline))
+#  define UNZ_INLINE      static inline __attribute__((always_inline))
+#  define UNZ_ALIGN(X)    __attribute__((aligned(X)))
+#  define UNZ_HOT         __attribute__((hot))
+#  define UNZ_HOT_INLINE  static inline __attribute__((hot, always_inline))
 #endif
 
 #ifndef __has_builtin
