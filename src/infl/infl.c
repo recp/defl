@@ -77,7 +77,7 @@ UNZ_INLINE int min(int a, int b) { return a < b ? a : b; }
       }                                                                       \
       if (unlikely(!bs.npbits)) {                                             \
         if (unlikely(bs.p >= bs.end)                                          \
-            && (!(bs.chunk = bs.chunk->next)                                  \
+            && (!bs.chunk || !(bs.chunk = bs.chunk->next)                     \
                 || !(bs.p = bs.chunk->p) || !(bs.end = bs.chunk->end))) {     \
           if(bs.nbits)break;else return UNZ_ERR;                              \
         }                                                                     \
@@ -556,7 +556,7 @@ infl(defl_stream_t * __restrict stream) {
           goto err;
 
         DONATE();
-        if (infl_block(stream, &dyn_tlen, &dyn_tdist) != UNZ_OK) goto err;
+        if (infl_block(stream, &dyn_tlen, &dyn_tdist) < UNZ_OK) goto err;
         RESTORE();
       } break;
       default:
