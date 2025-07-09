@@ -118,6 +118,8 @@ make
 
 # run tests
 make test
+
+# make fuzz
 ```
 
 ### with different configurations
