@@ -12,6 +12,8 @@ target_include_directories(test_files PRIVATE
 
 target_link_libraries(test_files defl)
 
+target_compile_definitions(test_files PRIVATE UNZ_STATIC=1)
+
 # Add math library for performance tests
 if(NOT WIN32)
     target_link_libraries(test_files m)
@@ -90,6 +92,8 @@ target_include_directories(test_fuzz PRIVATE
 
 target_link_libraries(test_fuzz defl)
 
+target_compile_definitions(test_fuzz PRIVATE UNZ_STATIC=1)
+
 # Add math library if needed
 if(NOT WIN32)
     target_link_libraries(test_fuzz m)
@@ -154,6 +158,8 @@ target_include_directories(test_fuzz_afl PRIVATE
 
 target_compile_definitions(test_fuzz_afl PRIVATE AFL_PERSISTENT)
 target_link_libraries(test_fuzz_afl defl)
+
+target_compile_definitions(test_fuzz_afl PRIVATE UNZ_STATIC=1)
 
 # Add math library if needed
 if(NOT WIN32)

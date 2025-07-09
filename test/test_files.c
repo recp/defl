@@ -19,6 +19,7 @@
 #define getcwd _getcwd
 #define chdir _chdir
 #define stat _stat
+#define strdup _strdup
 #else
 #include <dirent.h>
 #include <unistd.h>
@@ -114,7 +115,7 @@ static void test_file(const char *filename) {
     }
     
     /* Include compressed data */
-    infl_include(stream, comp_data, comp_size);
+    infl_include(stream, comp_data, (uint32_t)comp_size);
     
     /* Decompress */
     int ret = infl(stream);
@@ -198,11 +199,11 @@ static void test_file_chunked(const char *filename) {
     size_t pos = 0;
     while (pos < comp_size) {
         /* Vary chunk size: 1, 2, 4, 8 bytes */
-        size_t chunk_size = 1 << (pos % 4);
+        size_t chunk_size = 1ULL << (pos % 4);
         if (chunk_size > 512) chunk_size = 512;
         if (pos + chunk_size > comp_size) chunk_size = comp_size - pos;
         
-        infl_include(stream, comp_data + pos, chunk_size);
+        infl_include(stream, comp_data + pos, (uint32_t)chunk_size);
         pos += chunk_size;
     }
     

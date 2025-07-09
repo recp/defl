@@ -61,6 +61,7 @@ target_include_directories(defl
 
 target_compile_definitions(defl PRIVATE
     UNZ_STATIC=1
+    UNZ_EXPORTS=1
 )
 
 # Add POSIX feature test macros for alignment functions
