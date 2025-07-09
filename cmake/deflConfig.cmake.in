@@ -1,0 +1,24 @@
+@PACKAGE_INIT@
+
+include(CMakeFindDependencyMacro)
+
+# Find huff dependency
+find_dependency(huff QUIET)
+if(NOT huff_FOUND)
+    # Try to find huff headers manually if package not found
+    find_path(HUFF_INCLUDE_DIR NAMES huff/huff.h 
+        PATHS 
+            "${CMAKE_CURRENT_LIST_DIR}/../../../huff/include"
+            "${CMAKE_CURRENT_LIST_DIR}/../../huff/include"
+        NO_DEFAULT_PATH
+    )
+    if(NOT HUFF_INCLUDE_DIR)
+        set(${CMAKE_FIND_PACKAGE_NAME}_NOT_FOUND_MESSAGE "huff library not found")
+        set(${CMAKE_FIND_PACKAGE_NAME}_FOUND FALSE)
+        return()
+    endif()
+endif()
+
+include("${CMAKE_CURRENT_LIST_DIR}/deflTargets.cmake")
+
+check_required_components(defl)
