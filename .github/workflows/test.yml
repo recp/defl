@@ -46,16 +46,9 @@ jobs:
     - name: Memory leak check (Debug only)
       if: matrix.build_type == 'Debug'
       run: |
-        cd build
-        # Generate test data if it doesn't exist
-        if [ ! -d "test/data/raw" ]; then
-          echo "Test data not found, generating..."
-          # Go back to project root, then into test/data
-          cd ../test/data
-          python3 gendata.py
-          cd ../../build
-        fi
-        valgrind --leak-check=full --error-exitcode=1 ./test/test_files
+        # Run valgrind from the test directory where data files are located
+        cd test
+        valgrind --leak-check=full --error-exitcode=1 ./test_files
     
     - name: Fuzz test
       if: matrix.compiler == 'clang' && matrix.build_type == 'Debug'
