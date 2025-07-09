@@ -92,15 +92,55 @@ if (!infl_buf(src, srclen, dst, dstlen 1)) {
 }
 ```
 
+
+## Building
+
+```bash
+# create build directory
+mkdir build && cd build
+
+# configure and build
+cmake ..
+make -j$(nproc)
+```
+
+### or with tests
+
+Test is optional to reduce build time if not needed, so it must be enabled explicitly `-DDEFL_USE_TEST=ON`.
+
+```bash
+# configure with tests enabled
+cmake -DDEFL_USE_TEST=ON ..
+make
+
+# generate test data ( if not exists in test/data)
+# make gen_test_data
+
+# run tests
+make test
+```
+
+### with different configurations
+
+```bash
+# debug build
+cmake -DCMAKE_BUILD_TYPE=Debug -DDEFL_USE_TEST=ON ..
+make
+
+# release build (default)
+cmake -DCMAKE_BUILD_TYPE=Release ..
+make
+
+# with specific compiler
+cmake -DCMAKE_C_COMPILER=clang -DDEFL_USE_TEST=ON ..
+make
+```
+
 ## TODO
 
 - [x] implement inflate
   - [ ] implement inflate stream
 - [ ] implement deflate
-- [ ] tests
-- [ ] build
+- [x] tests
+- [x] build
 - [ ] documentation
-
-## 🔨 Build
-
-todo
