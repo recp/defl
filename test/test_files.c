@@ -104,7 +104,7 @@ static void test_file(const char *filename) {
     memset(output, 0, orig_size + 1000);
     
     /* Initialize DEFLATE stream */
-    infl_stream_t *stream = infl_init(output, orig_size + 1000, 0);
+    infl_stream_t *stream = infl_init(output, (uint32_t)orig_size + 1000, 0);
     if (!stream) {
         printf("FAIL (init)\n");
         free(orig_data);
@@ -186,7 +186,7 @@ static void test_file_chunked(const char *filename) {
     uint8_t *output = malloc(orig_size + 1000);
     memset(output, 0, orig_size + 1000);
     
-    infl_stream_t *stream = infl_init(output, orig_size + 1000, 0);
+    infl_stream_t *stream = infl_init(output, (uint32_t)orig_size + 1000, 0);
     if (!stream) {
         printf("FAIL (init)\n");
         free(orig_data);
