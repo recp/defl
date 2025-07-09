@@ -32,6 +32,7 @@
       ((*(ptr) = _aligned_malloc((size), (alignment))) != NULL ? 0 : -1)
 #  define ALIGNED_FREE(ptr) _aligned_free(ptr)
 #else
+#  include <unistd.h>
   /* POSIX systems (Linux, macOS, etc.) */
 #  define ALIGNED_ALLOC(ptr, alignment, size) \
       posix_memalign((void**)(ptr), (alignment), (size))

@@ -8,10 +8,21 @@
 #include <string.h>
 #include <stdint.h>
 #include <sys/stat.h>
-#include <dirent.h>
 #include <stdbool.h>
-#include <unistd.h>
 #include <defl/infl.h>
+
+/* Platform-specific directory handling */
+#ifdef _WIN32
+#include <windows.h>
+#include <direct.h>
+#include <io.h>
+#define getcwd _getcwd
+#define chdir _chdir
+#define stat _stat
+#else
+#include <dirent.h>
+#include <unistd.h>
+#endif
 
 typedef struct {
     int total;
@@ -209,8 +220,58 @@ static void test_file_chunked(const char *filename) {
     free(output);
 }
 
-/* List files in directory */
+/* List files in directory - Windows/POSIX compatible */
 static char** list_files(const char *dir, int *count) {
+#ifdef _WIN32
+    WIN32_FIND_DATA findFileData;
+    HANDLE hFind;
+    char search_path[512];
+    char **files = NULL;
+    int capacity = 0;
+    
+    *count = 0;
+    
+    /* Create search pattern */
+    snprintf(search_path, sizeof(search_path), "%s\\*", dir);
+    
+    hFind = FindFirstFile(search_path, &findFileData);
+    if (hFind == INVALID_HANDLE_VALUE) {
+        return NULL;
+    }
+    
+    do {
+        /* Skip directories and hidden files */
+        if (!(findFileData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) &&
+            findFileData.cFileName[0] != '.') {
+            
+            /* Expand array if needed */
+            if (*count >= capacity) {
+                capacity = capacity ? capacity * 2 : 16;
+                files = realloc(files, capacity * sizeof(char*));
+                if (!files) {
+                    FindClose(hFind);
+                    return NULL;
+                }
+            }
+            
+            files[*count] = strdup(findFileData.cFileName);
+            if (!files[*count]) {
+                /* Cleanup on failure */
+                while (--(*count) >= 0) {
+                    free(files[*count]);
+                }
+                free(files);
+                FindClose(hFind);
+                return NULL;
+            }
+            (*count)++;
+        }
+    } while (FindNextFile(hFind, &findFileData) != 0);
+    
+    FindClose(hFind);
+    return files;
+    
+#else
     DIR *d = opendir(dir);
     if (!d) {
         *count = 0;
@@ -246,6 +307,7 @@ static char** list_files(const char *dir, int *count) {
     
     closedir(d);
     return files;
+#endif
 }
 
 /* Compare function for qsort */
@@ -360,7 +422,11 @@ int main(int argc, char *argv[]) {
         } else {
             printf("Error: Neither data/raw/ nor test/data/raw/ directory found!\n");
             printf("Please run from project root after:\n");
+#ifdef _WIN32
+            printf("  cd test\\data\n");
+#else
             printf("  cd test/data\n");
+#endif
             printf("  python3 gendata.py\n");
             return 1;
         }

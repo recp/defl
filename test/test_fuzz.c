@@ -9,6 +9,14 @@
 #include <string.h>
 #include <defl/infl.h>
 
+/* Platform-specific includes */
+#ifdef _WIN32
+#include <io.h>
+#define read _read
+#else
+#include <unistd.h>
+#endif
+
 /* Maximum output buffer size for fuzzing */
 #define MAX_OUTPUT_SIZE (1024 * 1024)  /* 1MB */
 
@@ -52,7 +60,6 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
 
 /* AFL persistent mode support */
 #ifdef AFL_PERSISTENT
-#include <unistd.h>
 
 int main(int argc, char *argv[]) {
     uint8_t *data = malloc(100000);
@@ -69,7 +76,11 @@ int main(int argc, char *argv[]) {
     
     while (__AFL_LOOP(10000)) {
         /* Read from stdin */
+#ifdef _WIN32
+        size_t size = _read(0, data, 100000);
+#else
         size_t size = read(0, data, 100000);
+#endif
         
         if (size > 0) {
             /* Test various configurations */
