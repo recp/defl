@@ -1,5 +1,16 @@
 # 🗜️ defl - deflate (WIP)
 
+<br>
+<p align="center">
+    <a href="https://github.com/recp/defl/actions/workflows/test.yml">
+        <img src="https://github.com/recp/cglm/actions/workflows/ci.yml/badge.svg"
+             alt="Build Status">
+    </a>
+    <a href="https://codecov.io/github/recp/defl" > 
+     <img src="https://codecov.io/github/recp/defl/graph/badge.svg?token=L1FH51M848"/> 
+    </a>
+</p>
+
 A high-performance, small DEFLATE/ZLIB decompression implementation in C. Optimized for minimal memory usage and maximum throughput.
 
 - 📌 To get best performance try to compile sources directly into project instead of external linking
