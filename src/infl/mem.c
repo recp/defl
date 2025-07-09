@@ -25,6 +25,19 @@
 #  include <immintrin.h>
 #endif
 
+ /* Platform-specific aligned allocation helpers */
+#ifdef _WIN32
+#  include <malloc.h>
+#  define ALIGNED_ALLOC(ptr, alignment, size) \
+      ((*(ptr) = _aligned_malloc((size), (alignment))) != NULL ? 0 : -1)
+#  define ALIGNED_FREE(ptr) _aligned_free(ptr)
+#else
+  /* POSIX systems (Linux, macOS, etc.) */
+#  define ALIGNED_ALLOC(ptr, alignment, size) \
+      posix_memalign((void**)(ptr), (alignment), (size))
+#  define ALIGNED_FREE(ptr) free(ptr)
+#endif
+
 /* initialize chunk pool */
 static bool
 infl_init_chunk_pool(infl_stream_t * __restrict stream) {
@@ -65,13 +78,13 @@ infl_init_chunk_pool(infl_stream_t * __restrict stream) {
     }
     
     /* allocate aligned buffer for better performance */
-    if (posix_memalign((void**)&stream->chunk_buffers[i], 64, UNZ_CHUNK_PAGE_SIZE) != 0) {
+    if (ALIGNED_ALLOC(&stream->chunk_buffers[i], 64, UNZ_CHUNK_PAGE_SIZE) != 0) {
       stream->chunk_buffers[i] = malloc(UNZ_CHUNK_PAGE_SIZE);
       if (!stream->chunk_buffers[i]) {
         /* cleanup on failure */
         free(stream->chunk_pool[i]);
         while (--i >= 0) {
-          free(stream->chunk_buffers[i]);
+          ALIGNED_FREE(stream->chunk_buffers[i]);
           free(stream->chunk_pool[i]);
         }
         /* cleanup struct pool too */
@@ -257,7 +270,7 @@ fallback_alloc:
     
     /* set up direct pointer (no copying for large chunks) */
     chk->p             = ptr;
-    chk->end           = ptr + len;
+    chk->end           = (char *)ptr + len;
     chk->buffer        = NULL;
     chk->buffer_size   = 0;
     chk->used          = len;
@@ -325,7 +338,7 @@ infl_destroy(defl_stream_t * __restrict stream) {
 
   /* free appendable chunk pool */
   for (i = 0; i < UNZ_CHUNK_POOL_SIZE; i++) {
-    if (stream->chunk_buffers[i]) free(stream->chunk_buffers[i]);
+    if (stream->chunk_buffers[i]) ALIGNED_FREE(stream->chunk_buffers[i]);
     if (stream->chunk_pool[i])    free(stream->chunk_pool[i]);
   }
 
