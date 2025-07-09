@@ -50,6 +50,8 @@ zlib_header(defl_stream_t * __restrict stream,
   UnzResult res;
   uint8_t   cmf, cm, fdict, flags /*, cinfo, fcheck, flevel*/;
 
+  (void)stream;
+
   /**
    * nodict: PNG spec doesnt allow dict so give a chance to skip fdict and fdict
    *         errors.

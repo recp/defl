@@ -274,7 +274,7 @@ infl_block(defl_stream_t          * __restrict stream,
       }
       dst[dpos] = used;
       switch (len) {
-        case 3: dst[dpos+2] = used;
+        case 3: dst[dpos+2] = used; /* fall through */
         case 2: dst[dpos+1] = used; break;
       }
       dpos += len;
@@ -297,7 +297,7 @@ infl_block(defl_stream_t          * __restrict stream,
       }
       dst[dpos] = dst[src];
       switch (len) {
-        case 3: dst[dpos+2] = dst[src+2];
+        case 3: dst[dpos+2] = dst[src+2]; /* fall through */
         case 2: dst[dpos+1] = dst[src+1]; break;
       }
       dpos += len;
@@ -354,9 +354,9 @@ infl_raw(defl_stream_t * __restrict stream) {
     if (nbytes <= 4) {
       val = (uint32_t)bs.bits;
       switch (nbytes) {
-        case 4: dst[3] = (uint8_t)(val >> 24);
-        case 3: dst[2] = (uint8_t)(val >> 16);
-        case 2: dst[1] = (uint8_t)(val >> 8);
+        case 4: dst[3] = (uint8_t)(val >> 24); /* fall through */
+        case 3: dst[2] = (uint8_t)(val >> 16); /* fall through */
+        case 2: dst[1] = (uint8_t)(val >> 8);  /* fall through */
         case 1: dst[0] = (uint8_t)val;
       }
     } else {
@@ -585,6 +585,8 @@ int
 infl_stream(infl_stream_t * __restrict stream,
             const void    * __restrict src,
             uint32_t                   srclen) {
+  (void)src;
+  (void)srclen;
   return infl(stream);
 }
 

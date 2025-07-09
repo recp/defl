@@ -143,6 +143,8 @@ get_pooled_chunk_struct(infl_stream_t * __restrict stream) {
 /* prefetch data for better performance */
 static inline void
 prefetch_data(const void *addr, size_t len) {
+  (void)addr;
+  (void)len;
 #if defined(__builtin_prefetch)
   const char *p = (const char *)addr;
   for (size_t i = 0; i < len; i += 64) {
@@ -271,7 +273,7 @@ fallback_alloc:
     
     /* set up direct pointer (no copying for large chunks) */
     chk->p             = ptr;
-    chk->end           = (char *)ptr + len;
+    chk->end           = (const uint8_t *)ptr + len;
     chk->buffer        = NULL;
     chk->buffer_size   = 0;
     chk->used          = len;

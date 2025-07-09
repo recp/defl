@@ -336,9 +336,6 @@ static void test_error_conditions(void) {
     g_results.total++;
     
     /* Test buffer overflow - adjust expected behavior */
-    const uint8_t large_data[] = {
-        0x01, 0x0A, 0x00, 0xF5, 0xFF  /* 10 bytes uncompressed, but we'll give small buffer */
-    };
     /* Add actual data */
     const uint8_t large_data_full[] = {
         0x01, 0x0A, 0x00, 0xF5, 0xFF,  /* 10 bytes uncompressed */
