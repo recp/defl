@@ -78,23 +78,6 @@ add_custom_target(clean_test_data
     COMMENT "Cleaning generated test data"
 )
 
-# Benchmark executable (optional)
-add_executable(defl_bench EXCLUDE_FROM_ALL
-    benchmark.c
-)
-
-target_include_directories(defl_bench PRIVATE
-    ${CMAKE_SOURCE_DIR}/include
-    ${HUFF_INCLUDE_DIR}
-)
-
-target_link_libraries(defl_bench defl)
-
-# Add math library if needed
-if(NOT WIN32)
-    target_link_libraries(defl_bench m)
-endif()
-
 # Fuzz testing executable
 add_executable(test_fuzz EXCLUDE_FROM_ALL
     test_fuzz.c
