@@ -31,9 +31,14 @@ if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
 endif()
 
 # Find required dependencies
-find_path(HUFF_INCLUDE_DIR NAMES huff/huff.h PATHS ../huff/include)
+find_path(HUFF_INCLUDE_DIR NAMES huff/huff.h 
+    PATHS 
+        ${CMAKE_CURRENT_SOURCE_DIR}/deps/huff/include
+        ../huff/include
+    NO_DEFAULT_PATH
+)
 if(NOT HUFF_INCLUDE_DIR)
-    message(FATAL_ERROR "huff library not found. Please ensure ../huff/include/huff/huff.h exists")
+    message(FATAL_ERROR "huff library not found. Please ensure huff is available as a git submodule in deps/huff or at ../huff/include/huff/huff.h")
 endif()
 
 # Make HUFF_INCLUDE_DIR available to subdirectories
