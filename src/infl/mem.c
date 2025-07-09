@@ -193,11 +193,11 @@ fast_memcpy(uint8_t * __restrict dst, const uint8_t * __restrict src, size_t len
 
   /* handle final bytes */
   switch (len - i) {
-    case 7: dst[i+6]              = src[i+6];
-    case 6: dst[i+5]              = src[i+5];
-    case 5: dst[i+4]              = src[i+4];
+    case 7: dst[i+6]              = src[i+6]; /* fall through */
+    case 6: dst[i+5]              = src[i+5]; /* fall through */
+    case 5: dst[i+4]              = src[i+4]; /* fall through */
     case 4: *(uint32_t*)(dst + i) = *(uint32_t*)(src + i); break;
-    case 3: dst[i+2]              = src[i+2];
+    case 3: dst[i+2]              = src[i+2]; /* fall through */
     case 2: *(uint16_t*)(dst + i) = *(uint16_t*)(src + i); break;
     case 1: dst[i]                = src[i]; break;
   }
