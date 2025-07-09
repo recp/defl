@@ -49,9 +49,11 @@ jobs:
         cd build
         # Generate test data if it doesn't exist
         if [ ! -d "test/data/raw" ]; then
-          cd test/data
+          echo "Test data not found, generating..."
+          # Go back to project root, then into test/data
+          cd ../test/data
           python3 gendata.py
-          cd ../..
+          cd ../../build
         fi
         valgrind --leak-check=full --error-exitcode=1 ./test/test_files
     
