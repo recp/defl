@@ -66,6 +66,16 @@ int
 infl(infl_stream_t * __restrict stream);
 
 /*!
+ * @brief reset the chunk pool for reuse - call this after processing
+ *        to reuse chunks for the next image without reallocation
+ *
+ * @param[in] stream  deflate stream
+ */
+UNZ_EXPORT
+void
+infl_reset_pool(infl_stream_t * __restrict stream);
+
+/*!
  * @brief destroys inflate stream and cleanup
  *
  * @param[in] stream  deflate stream

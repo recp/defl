@@ -40,6 +40,17 @@
 
 #define ARRAY_LEN(ARR) (sizeof(ARR) / sizeof(ARR[0]))
 
+/* chunk pool configuration - optimization for PNG IDAT chunks */
+#define UNZ_CHUNK_POOL_SIZE 32          /* for images with many IDATs        */
+#define UNZ_CHUNK_PAGE_SIZE 32768       /* 32KB - typical for PNG IDAT       */
+#define UNZ_CHUNK_APPEND_THRESHOLD 8192 /* 8KB - append if smaller than this */
+
+/* chunk structure pool - for reducing calloc overhead */
+#define UNZ_CHUNK_STRUCT_POOL_SIZE 1024 /* for large images                  */
+
+/* cache line size for alignment */
+#define CACHE_LINE_SIZE 64
+
 typedef struct unz__chunk_t  unz_chunk_t;
 typedef struct unz__chunk_t  defl_chunk_t;
 typedef struct unz__stream_t defl_stream_t;
@@ -49,6 +60,11 @@ struct unz__chunk_t {
   const uint8_t       *p;
   const uint8_t       *end;
   size_t               bitpos;
+  uint8_t             *buffer;        /* owned buffer for appendable chunks  */
+  size_t               buffer_size;   /* total buffer size                   */
+  size_t               used;          /* used bytes in buffer                */
+  bool                 is_pooled;     /* true if from pre-allocated pool     */
+  bool                 is_appendable; /* true if we can append to this chunk */
 };
 
 #define BITS_TYPE uint_fast64_t
@@ -83,6 +99,25 @@ struct unz__stream_t {
   int            flags;
 
   unz__bitstate_t bs;
+  
+  /* chunk pool management */
+  unz_chunk_t    *chunk_pool[UNZ_CHUNK_POOL_SIZE];
+  uint8_t        *chunk_buffers[UNZ_CHUNK_POOL_SIZE];
+  int             pool_used;
+  unz_chunk_t    *current_appendable; /* current chunk for appending small data */
+  
+  /* chunk structure pool - for non-appendable chunks */
+  unz_chunk_t    *chunk_struct_pool[UNZ_CHUNK_STRUCT_POOL_SIZE];
+  int             struct_pool_used;
+  int             struct_pool_available;
+  
+  /* statistics for tuning (optional - can be ifdef'd out in release) */
+#ifdef UNZ_STATS
+  size_t          total_appends;
+  size_t          total_directs;
+  size_t          pool_hits;
+  size_t          pool_misses;
+#endif
 };
 
 #endif /* src_common_h */

@@ -455,8 +455,8 @@ infl_raw(defl_stream_t * __restrict stream) {
 UNZ_EXPORT
 int
 infl(defl_stream_t * __restrict stream) {
-  static huff_table_ext_t _tlitl={0}, _tdist={0};
-  static bool         _init=false;
+  static huff_table_ext_t _tlitl={0},_tdist={0};
+  static bool             _init=false;
 
   unz__bitstate_t bs;
   uint_fast8_t    btype, bfinal = 0;
@@ -468,7 +468,7 @@ infl(defl_stream_t * __restrict stream) {
   /* initilize static tables */
   if (!_init) {
     if (!huff_init_lsb_extof(&_tlitl, f_llitl, NULL, lvals, 257, 288) ||
-        !huff_init_lsb_ext(&_tdist, f_ldist, NULL, dvals, 32)) {
+        !huff_init_lsb_ext(&_tdist,   f_ldist, NULL, dvals, 32)) {
       return UNZ_ERR;
     }
     _init = true;
