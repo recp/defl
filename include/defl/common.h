@@ -38,6 +38,9 @@ extern "C" {
 #include <stdint.h>
 #include <stddef.h>
 #include <stdbool.h>
+#include <stdlib.h>
+#include <string.h>
+#include <errno.h>
 
 #if defined(_MSC_VER) || defined(__MINGW32__) || defined(__MINGW64__)
 #  define UNZ_WINAPI
