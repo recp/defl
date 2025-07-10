@@ -198,24 +198,74 @@ infl_block(defl_stream_t          * __restrict stream,
         uint8x16_t value = vdupq_n_u8(used);
         do {
           vst1q_u8(&dst[dpos], value);
-          len-=16;dpos+=16;
+          len -= 16; dpos += 16;
         } while (len >= 16);
       }
 #endif
-      /* simple loop works for all cases, including overlapping memory. */
-      while (len--) dst[dpos++] = used;
+      while (len >= 8) {
+        dst[dpos]   = used;
+        dst[dpos+1] = used;
+        dst[dpos+2] = used;
+        dst[dpos+3] = used;
+        dst[dpos+4] = used;
+        dst[dpos+5] = used;
+        dst[dpos+6] = used;
+        dst[dpos+7] = used;
+        len -= 8; dpos += 8;
+      }
+      while (len >= 4) {
+        dst[dpos]   = used;
+        dst[dpos+1] = used;
+        dst[dpos+2] = used;
+        dst[dpos+3] = used;
+        len -= 4; dpos += 4;
+      }
+      if (len >= 1) {
+        dst[dpos] = used;
+        switch (len - 1) {
+          case 2: dst[dpos+2] = used; /* fall through */
+          case 1: dst[dpos+1] = used; break;
+          case 0:                     break;
+        }
+        dpos += len;
+      }
     } else {
       src = dpos - dist;
 #if defined(__ARM_NEON) || defined(__ARM_NEON__)
       if (len >= 16 && dist >= 16) {
         do {
           vst1q_u8(&dst[dpos], vld1q_u8(&dst[src]));
-          len-=16;dpos+=16;src+=16;
+          len -= 16; dpos += 16; src += 16;
         } while (len >= 16);
       }
 #endif
-      /* simple loop works for all cases, including overlapping memory. */
-      while (len--) dst[dpos++] = dst[src++];
+      while (len >= 8) {
+        dst[dpos]   = dst[src];
+        dst[dpos+1] = dst[src+1];
+        dst[dpos+2] = dst[src+2];
+        dst[dpos+3] = dst[src+3];
+        dst[dpos+4] = dst[src+4];
+        dst[dpos+5] = dst[src+5];
+        dst[dpos+6] = dst[src+6];
+        dst[dpos+7] = dst[src+7];
+        len -= 8; dpos += 8; src += 8;
+      }
+      while (len >= 4) {
+        dst[dpos]   = dst[src];
+        dst[dpos+1] = dst[src+1];
+        dst[dpos+2] = dst[src+2];
+        dst[dpos+3] = dst[src+3];
+        len -= 4; dpos += 4; src += 4;
+      }
+      if (len >= 1) {
+        dst[dpos] = dst[src];
+        switch (len - 1) {
+          case 2: dst[dpos+2] = dst[src+2]; /* fall through */
+          case 1: dst[dpos+1] = dst[src+1]; break;
+          case 0:                           break;
+        }
+        dpos += len;
+      }
     }
   }
 
