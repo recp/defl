@@ -152,8 +152,8 @@ make
 ## TODO
 
 - [x] implement inflate
-  - [ ] implement inflate stream
-- [ ] implement deflate
+- [x] implement inflate stream
 - [x] tests
 - [x] build
 - [ ] documentation
+- [ ] implement deflate

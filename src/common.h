@@ -51,6 +51,10 @@
 /* cache line size for alignment */
 #define CACHE_LINE_SIZE 64
 
+#define MAX_CODELEN_CODES 19
+#define MAX_LITLEN_CODES  288
+#define MAX_DIST_CODES    32
+
 typedef struct unz__chunk_t  unz_chunk_t;
 typedef struct unz__chunk_t  defl_chunk_t;
 typedef struct unz__stream_t defl_stream_t;
@@ -80,6 +84,19 @@ typedef struct unz__bitstate_t {
   unsigned             npbits;
 } unz__bitstate_t;
 
+typedef enum {
+  INFL_STATE_NONE = 0,
+  INFL_STATE_HEADER,
+  INFL_STATE_BLOCK_HEADER, 
+  INFL_STATE_RAW,
+  INFL_STATE_FIXED,
+  INFL_STATE_DYNAMIC_HEADER,
+  INFL_STATE_DYNAMIC_CODELEN,
+  INFL_STATE_DYNAMIC_LITLEN,
+  INFL_STATE_DYNAMIC_BLOCK,
+  INFL_STATE_DONE
+} infl_state_t;
+
 struct unz__stream_t {
   unz_chunk_t   *start;
   unz_chunk_t   *end;
@@ -99,6 +116,28 @@ struct unz__stream_t {
   int            flags;
 
   unz__bitstate_t bs;
+  
+  /* streaming state start */
+  infl_state_t   stream_state;
+  uint_fast8_t   stream_btype;
+  uint_fast8_t   stream_bfinal;
+  
+  /* raw block state for resume */
+  struct {
+    uint16_t len;
+    uint16_t remlen;
+    uint8_t  resuming;
+  } raw_state;
+  
+  /* dynamic huffman state */
+  struct {
+    int               hlit, hdist, hclen;
+    int               i, n, repeat, prev;
+    uint_fast8_t      lens[MAX_LITLEN_CODES + MAX_DIST_CODES];
+    huff_table_ext_t  tlit, tdist;
+    uint8_t           tlit_valid, tdist_valid;
+  } dyn_state;
+  /* streaming state end */
   
   /* chunk pool management */
   unz_chunk_t    *chunk_pool[UNZ_CHUNK_POOL_SIZE];

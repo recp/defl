@@ -78,14 +78,15 @@ extern "C" {
 #endif
 
 typedef enum UnzResult {
-  UNZ_NOOP     =  1,       /* no operation needed */
-  UNZ_OK       =  0,
-  UNZ_ERR      = -1,       /* UKNOWN ERR */
-  UNZ_EFOUND   = -1000,
-  UNZ_ENOMEM   = -ENOMEM,
-  UNZ_EPERM    = -EPERM,
-  UNZ_EBADF    = -EBADF,   /* file couldn't parsed / loaded */
-  UNZ_EFULL    = -ENOBUFS  /* no space ENOBUFS vs ENOSPC    */
+  UNZ_UNFINISHED =  2,       /* need more data for streaming */
+  UNZ_NOOP       =  1,       /* no operation needed */
+  UNZ_OK         =  0,
+  UNZ_ERR        = -1,       /* UKNOWN ERR */
+  UNZ_EFOUND     = -1000,
+  UNZ_ENOMEM     = -ENOMEM,
+  UNZ_EPERM      = -EPERM,
+  UNZ_EBADF      = -EBADF,   /* file couldn't parsed / loaded */
+  UNZ_EFULL      = -ENOBUFS  /* no space ENOBUFS vs ENOSPC    */
 } UnzResult;
 
 #endif

@@ -48,6 +48,7 @@ set(HUFF_INCLUDE_DIR ${HUFF_INCLUDE_DIR} CACHE PATH "Path to huff headers" FORCE
 add_library(defl STATIC
     src/infl/infl.c
     src/infl/mem.c
+    src/infl/stream.c
 )
 
 target_include_directories(defl
