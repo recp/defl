@@ -424,8 +424,8 @@ infl(defl_stream_t * __restrict stream) {
 
   /* initilize static tables */
   if (!_init) {
-    if (!huff_init_lsb_extof(&_tlitl, f_llitl, NULL, lvals, 257, 288) ||
-        !huff_init_lsb_ext(&_tdist,   f_ldist, NULL, dvals, 32)) {
+    if (!huff_init_lsb_extof(&_tlitl,fxd,NULL,lvals,257,288) ||
+        !huff_init_lsb_ext(&_tdist,fxd+288,NULL,dvals,32)) {
       return UNZ_ERR;
     }
     _init = true;
@@ -478,7 +478,7 @@ infl(defl_stream_t * __restrict stream) {
 
         for (i = 0; i < hclen; i++) {
           REFILL(3);
-          lens.codelens[l_orders[i]] = bs.bits & 0x7;
+          lens.codelens[ord[i]] = bs.bits & 0x7;
           CONSUME(3);
         }
 

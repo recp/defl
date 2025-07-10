@@ -388,8 +388,8 @@ infl_stream(infl_stream_t * __restrict stream,
 
   /* initialize static tables for streaming */
   if (!_init_s) {
-    if (!huff_init_lsb_extof(&_tlitl_s,f_llitl,NULL,lvals,257,288) ||
-        !huff_init_lsb_ext(&_tdist_s,f_ldist,NULL,dvals,32)) {
+    if (!huff_init_lsb_extof(&_tlitl_s,fxd,NULL,lvals,257,288) ||
+        !huff_init_lsb_ext(&_tdist_s,fxd+288,NULL,dvals,32)) {
       return UNZ_ERR;
     }
     _init_s = true;
@@ -520,7 +520,7 @@ state_fixed:
 
         for (i = 0; i < hclen; i++) {
           REFILL_STREAM(3);
-          lens.codelens[l_orders[i]] = bs.bits & 0x7;
+          lens.codelens[ord[i]] = bs.bits & 0x7;
           CONSUME(3);
         }
 
