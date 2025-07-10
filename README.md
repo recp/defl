@@ -3,7 +3,7 @@
 <br>
 <p align="center">
     <a href="https://github.com/recp/defl/actions/workflows/test.yml">
-        <img src="https://github.com/recp/cglm/actions/workflows/ci.yml/badge.svg"
+        <img src="https://github.com/recp/defl/actions/workflows/test.yml/badge.svg"
              alt="Build Status">
     </a>
     <a href="https://codecov.io/github/recp/defl" > 
