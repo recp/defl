@@ -202,31 +202,8 @@ infl_block(defl_stream_t          * __restrict stream,
         } while (len >= 16);
       }
 #endif
-      while (len >= 8) {
-        dst[dpos]   = used;
-        dst[dpos+1] = used;
-        dst[dpos+2] = used;
-        dst[dpos+3] = used;
-        dst[dpos+4] = used;
-        dst[dpos+5] = used;
-        dst[dpos+6] = used;
-        dst[dpos+7] = used;
-        len-=8;dpos+=8;
-      }
-      while (len >= 4) {
-        dst[dpos]   = used;
-        dst[dpos+1] = used;
-        dst[dpos+2] = used;
-        dst[dpos+3] = used;
-        len-=4;dpos+=4;
-      }
-      switch (len) {
-          case 3: dst[dpos+2] = used; /* fall through */
-          case 2: dst[dpos+1] = used; /* fall through */  
-          case 1: dst[dpos]   = used; break;
-          case 0:                     break;
-      }
-      dpos += len;
+      /* simple loop works for all cases, including overlapping memory. */
+      while (len--) dst[dpos++] = used;
     } else {
       src = dpos - dist;
 #if defined(__ARM_NEON) || defined(__ARM_NEON__)
@@ -237,20 +214,8 @@ infl_block(defl_stream_t          * __restrict stream,
         } while (len >= 16);
       }
 #endif
-      while (len >= 4) {
-        dst[dpos]   = dst[src];
-        dst[dpos+1] = dst[src+1];
-        dst[dpos+2] = dst[src+2];
-        dst[dpos+3] = dst[src+3];
-        len-=4;dpos+=4;src+=4;
-      }
-      switch (len) {
-        case 3: dst[dpos+2] = dst[src+2]; /* fall through */
-        case 2: dst[dpos+1] = dst[src+1]; /* fall through */
-        case 1: dst[dpos]   = dst[src]; break;
-        case 0:                         break;
-      }
-      dpos += len;
+      /* simple loop works for all cases, including overlapping memory. */
+      while (len--) dst[dpos++] = dst[src++];
     }
   }
 
