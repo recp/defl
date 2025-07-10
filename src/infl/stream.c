@@ -308,10 +308,11 @@ infl_block_stream(defl_stream_t          * __restrict stream,
         dst[dpos+3] = used;
         len-=4;dpos+=4;
       }
-      dst[dpos] = used;
       switch (len) {
-        case 3: dst[dpos+2] = used; /* fall through */
-        case 2: dst[dpos+1] = used; break;
+          case 3: dst[dpos+2] = used; /* fall through */
+          case 2: dst[dpos+1] = used; /* fall through */  
+          case 1: dst[dpos]   = used; break;
+          case 0:                     break;
       }
       dpos += len;
     } else {
@@ -331,10 +332,11 @@ infl_block_stream(defl_stream_t          * __restrict stream,
         dst[dpos+3] = dst[src+3];
         len-=4;dpos+=4;src+=4;
       }
-      dst[dpos] = dst[src];
       switch (len) {
         case 3: dst[dpos+2] = dst[src+2]; /* fall through */
-        case 2: dst[dpos+1] = dst[src+1]; break;
+        case 2: dst[dpos+1] = dst[src+1]; /* fall through */
+        case 1: dst[dpos]   = dst[src]; break;
+        case 0:                         break;
       }
       dpos += len;
     }
