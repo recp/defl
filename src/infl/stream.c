@@ -18,33 +18,32 @@
 #include "apicommon.h"
 
 #define REFILL_STREAM(req)                                                    \
-  if (unlikely(bs.nbits < (req))) {                                           \
-    int take;                                                                 \
-    do {                                                                      \
-      if ((take = min(64 - bs.nbits, bs.npbits)) != 64) {                     \
-        bs.bits   |= (bs.pbits&(((bitstream_t)1<<take)-1)) << bs.nbits;       \
-        bs.pbits >>= take;                                                    \
-        bs.nbits  += take;                                                    \
-        bs.npbits -= take;                                                    \
-      } else {                                                                \
-        bs.bits    = bs.pbits;                                                \
-        bs.nbits   = bs.npbits;                                               \
-        bs.pbits   = 0;                                                       \
-        bs.npbits  = 0;                                                       \
-      }                                                                       \
-      if (unlikely(!bs.npbits)) {                                             \
-        if (unlikely(bs.p >= bs.end)                                          \
-            && (!bs.chunk || !(bs.chunk = bs.chunk->next)                     \
-                || !(bs.p = bs.chunk->p) || !(bs.end = bs.chunk->end))) {     \
-          if(bs.nbits >= (req)) break;                                        \
-          DONATE();                                                           \
-          return UNZ_UNFINISHED;                                              \
+  do {                                                                        \
+    if (unlikely(bs.nbits < (req))) {                                         \
+      int take;                                                               \
+      do {                                                                    \
+        if ((take = min(64 - bs.nbits, bs.npbits)) != 64) {                   \
+          bs.bits   |= (bs.pbits&(((bitstream_t)1<<take)-1)) << bs.nbits;     \
+          bs.pbits >>= take;                                                  \
+          bs.nbits  += take;                                                  \
+          bs.npbits -= take;                                                  \
+        } else {                                                              \
+          bs.bits    = bs.pbits;                                              \
+          bs.nbits   = bs.npbits;                                             \
+          bs.pbits   = 0;                                                     \
+          bs.npbits  = 0;                                                     \
         }                                                                     \
-        bs.npbits=huff_read(&bs.p,&bs.pbits,bs.end);                          \
-      }                                                                       \
-    } while (unlikely(bs.nbits < (req) && bs.npbits));                        \
-  }
-
+        if (unlikely(!bs.npbits)) {                                           \
+          if (unlikely(bs.p >= bs.end)                                        \
+              && (!bs.chunk || !(bs.chunk = bs.chunk->next)                   \
+                  || !(bs.p = bs.chunk->p) || !(bs.end = bs.chunk->end))) {   \
+            if(bs.nbits) break; else { DONATE();return UNZ_UNFINISHED; }      \
+          }                                                                   \
+          bs.npbits=huff_read(&bs.p,&bs.pbits,bs.end);                        \
+        }                                                                     \
+      } while (unlikely(bs.nbits < (req) && bs.npbits));                      \
+    }                                                                         \
+  } while(0)
 
 static UNZ_HOT
 UnzResult
@@ -365,10 +364,22 @@ infl_stream(infl_stream_t * __restrict stream,
     infl_include(stream, src, srclen);
   }
 
+  /* initialize streaming state if this is the first call */
+  if (stream->stream_state == INFL_STATE_NONE && stream->start) {
+    stream->bs.chunk  = stream->start;
+    stream->bs.p      = stream->start->p;
+    stream->bs.end    = stream->start->end;
+    stream->bs.bits   = 0;
+    stream->bs.nbits  = 0;
+    stream->bs.pbits  = 0;
+    stream->bs.npbits = 0;
+  }
+  RESTORE();
+
   /* resume from saved state */
   if (stream->stream_state != INFL_STATE_NONE) {
     bfinal = stream->stream_bfinal;
-    RESTORE();
+    btype  = stream->stream_btype;
 
     /* jump to appropriate state */
     switch (stream->stream_state) {
@@ -396,13 +407,6 @@ infl_stream(infl_stream_t * __restrict stream,
     }
     _init_s = true;
   }
-
-  /* initialize bit reader if needed */
-  if (stream->stream_state == INFL_STATE_NONE) {
-    stream->bs.p   = stream->start->p;
-    stream->bs.end = stream->start->end;
-  }
-  RESTORE();
 
 state_header:
   if (stream->flags == 1 && unlikely(!stream->header)) {
@@ -585,9 +589,16 @@ state_fixed:
     }
   }
 
-  stream->stream_state = INFL_STATE_DONE;
-  DONATE();
-  return UNZ_OK;
+  if (bfinal) {
+    /* SUCCESS */
+    stream->stream_state = INFL_STATE_DONE;
+    DONATE();
+    return UNZ_OK;
+  } else {
+    /* WAIT / request more data */
+    DONATE();
+    return UNZ_UNFINISHED;
+  }
   
 err:
   return UNZ_ERR;
