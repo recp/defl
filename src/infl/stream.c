@@ -17,7 +17,7 @@
 #include "../common.h"
 #include "apicommon.h"
 
-#define REFILL_STREAM_RAW(req, XXX)                                           \
+#define REFILL_STREAM(req)                                                    \
   do {                                                                        \
     if (unlikely(bs.nbits < (req))) {                                         \
       int take;                                                               \
@@ -37,16 +37,13 @@
           if (unlikely(bs.p >= bs.end)                                        \
               && (!bs.chunk || !(bs.chunk = bs.chunk->next)                   \
                   || !(bs.p = bs.chunk->p) || !(bs.end = bs.chunk->end))) {   \
-            if(bs.nbits) break; else { XXX; return UNZ_UNFINISHED; }          \
+            if(bs.nbits) break; else { return UNZ_UNFINISHED; }               \
           }                                                                   \
           bs.npbits=huff_read(&bs.p,&bs.pbits,bs.end);                        \
         }                                                                     \
       } while (unlikely(bs.nbits < (req) && bs.npbits));                      \
     }                                                                         \
   } while(0)
-
-  #define REFILL_STREAM(req)         REFILL_STREAM_RAW(req,)
-  #define REFILL_STREAM_DONATE(req)  REFILL_STREAM_RAW(req, DONATE())                  
 
 static UNZ_HOT
 UnzResult
@@ -106,6 +103,13 @@ resume_copy:
   nbytes = bs.nbits >> 3;
   if (nbytes > 0 && remlen > 0) {
     nbytes = (nbytes < remlen) ? nbytes : remlen;
+    
+    /* additional safety check */
+    if (dpos + nbytes > dlen) {
+      stream->raw_state.resuming = 0;
+      return UNZ_EFULL;
+    }
+    
     if (nbytes <= 4) {
       val = (uint32_t)bs.bits;
       switch (nbytes) {
@@ -128,6 +132,13 @@ resume_copy:
   nbytes = bs.npbits >> 3;
   if (nbytes > 0 && remlen > 0) {
     nbytes = (nbytes < remlen) ? nbytes : remlen;
+    
+    /* additional safety check */
+    if (dpos + (len - remlen) + nbytes > dlen) {
+      stream->raw_state.resuming = 0;
+      return UNZ_EFULL;
+    }
+    
     for (i = 0; i < nbytes; i++) {
       dst[i] = (uint8_t)(bs.pbits >> (i << 3));
     }
@@ -156,6 +167,15 @@ resume_copy:
 
     if (likely(chkrem > 0)) {
       n = (chkrem < remlen) ? chkrem : remlen;
+      
+      /* final safety check before copying */
+      if (dpos + (len - remlen) + n > dlen) {
+        stream->raw_state.resuming = 1;
+        stream->raw_state.remlen   = remlen;
+        stream->dstpos             = dpos + (len - remlen);
+        DONATE();
+        return UNZ_EFULL;
+      }
 
 #if defined(__builtin_prefetch)
       if (n >= 256) {
@@ -365,8 +385,11 @@ infl_stream(infl_stream_t * __restrict stream,
     infl_include(stream, src, srclen);
   }
 
+  if (!stream->start)
+    return UNZ_NOOP;
+
   /* initialize streaming state if this is the first call */
-  if (stream->stream_state == INFL_STATE_NONE && stream->start) {
+  if (stream->stream_state == INFL_STATE_NONE) {
     stream->bs.chunk  = stream->start;
     stream->bs.p      = stream->start->p;
     stream->bs.end    = stream->start->end;
@@ -404,10 +427,6 @@ infl_stream(infl_stream_t * __restrict stream,
       default:                                break;
     }
   }
-
-  /* initial setup */
-  if (!stream->bs.chunk && !(stream->bs.chunk = stream->start))
-    return UNZ_NOOP;
 
   /* initialize static tables for streaming */
   if (!_init_s) {
@@ -533,15 +552,20 @@ state_fixed:
         stream->dyn_state.hdist = hdist;
         stream->dyn_state.hclen = hclen;
         stream->dyn_state.n     = n;
+        stream->dyn_state.i     = 0; /* start from beginning */
 
       state_dyn_header_resume:
         for (i = (stream->dyn_state.i > 0 ? stream->dyn_state.i : 0); i < hclen; i++) {
           REFILL_STREAM(3);
           lens.codelens[ord[i]] = bs.bits & 0x7;
           CONSUME(3);
-          stream->dyn_state.i = i + 1;  /* Save progress */
-          memcpy(stream->dyn_state.lens, lens.lens, sizeof(lens.lens)); /* Save state */
+          stream->dyn_state.i = i + 1;  /* save progress */
+          /* save the codelens we've read so far */
+          stream->dyn_state.lens[ord[i]] = lens.codelens[ord[i]];
         }
+
+        /* save state after finishing all codelens */
+        stream->dyn_state.i = 0; /* reset for next phase */
 
         if (!huff_init_fast_lsb(tcodelen,lens.codelens,NULL,MAX_CODELEN_CODES))
           goto err;
@@ -612,5 +636,6 @@ state_fixed:
   }
   
 err:
+  DONATE();
   return UNZ_ERR;
 }
