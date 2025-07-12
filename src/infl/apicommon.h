@@ -17,11 +17,9 @@
 #ifndef api_common_h
 #define api_common_h
 
+#include "zlib.h"
 #include "../common.h"
 #include "../../include/defl/infl.h"
-#include "../zlib/zlib.h"
-#include <math.h>
-#include <huff/huff.h>
 
 #if defined(__ARM_NEON) || defined(__ARM_NEON__)
 #  include <arm_neon.h>

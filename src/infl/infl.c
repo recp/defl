@@ -14,7 +14,6 @@
  * limitations under the License.
  */
 
-#include "../common.h"
 #include "apicommon.h"
 
 #define REFILL(req)                                                           \
