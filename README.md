@@ -61,7 +61,23 @@ infl_include(st, src, srclen);
 res = infl(st);
 ```
 
-#### Usage 2: Use Stream Api ( TODO: WIP )
+#### Usage 2: Use Contiguous Chunk Api
+
+```c
+#include <defl/infl.h>
+
+UnzResult res;
+
+/* decompress contiguous regions */
+res = infl_buf(src, srclen, dst, dstlen 1); /* 1: INFL_ZLIB or jsut pass INFL_ZLIB */
+
+/* or without detailed result check */
+if (!infl_buf(src, srclen, dst, dstlen 1)) {
+  goto err; // return -1 ... 
+}
+```
+
+#### Usage 3: Use Stream Api ( TODO: WIP )
 
 ```c
 #include <defl/infl.h>
@@ -84,22 +100,6 @@ if (res == UNZ_UNFINISHED) {
 ...
 if (res == UNZ_UNFINISHED) {
   res = infl_stream(st, src, srclen);
-}
-```
-
-#### Usage 3: Use Contiguous Chunk Api
-
-```c
-#include <defl/infl.h>
-
-UnzResult res;
-
-/* decompress contiguous regions */
-res = infl_buf(src, srclen, dst, dstlen 1); /* 1: INFL_ZLIB or jsut pass INFL_ZLIB */
-
-/* or without detailed result check */
-if (!infl_buf(src, srclen, dst, dstlen 1)) {
-  goto err; // return -1 ... 
 }
 ```
 
