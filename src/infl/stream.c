@@ -358,7 +358,7 @@ infl_stream(infl_stream_t * __restrict stream,
   static bool             _init_s=false;
 
   unz__bitstate_t bs;
-  uint_fast8_t    btype, bfinal;
+  uint_fast8_t    btype, bfinal=0;
 
   /* add new data */
   if (src && srclen > 0) {
