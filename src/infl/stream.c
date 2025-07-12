@@ -449,7 +449,7 @@ state_blk_head:
   while (!bfinal && bs.chunk) {
     stream->stream_state = INFL_STATE_BLOCK_HEADER;
 
-    REFILL_STREAM_DONATE(3);
+    REFILL_STREAM(3);
     bfinal = bs.bits & 0x1;
     btype  = (bs.bits >> 1) & 0x3;
     CONSUME(3);
@@ -518,7 +518,7 @@ state_fixed:
           }
         }
 
-        REFILL_STREAM_DONATE(14);
+        REFILL_STREAM(14);
         hlit  = (bs.bits & 0x1F) + 257;
         hdist = ((bs.bits >> 5) & 0x1F) + 1;
         hclen = ((bs.bits >> 10) & 0xF) + 4;
@@ -536,7 +536,7 @@ state_fixed:
 
       state_dyn_header_resume:
         for (i = (stream->dyn_state.i > 0 ? stream->dyn_state.i : 0); i < hclen; i++) {
-          REFILL_STREAM_DONATE(3);
+          REFILL_STREAM(3);
           lens.codelens[ord[i]] = bs.bits & 0x7;
           CONSUME(3);
           stream->dyn_state.i = i + 1;  /* Save progress */
@@ -554,7 +554,7 @@ state_fixed:
         i                    = stream->dyn_state.i;
 
         while (i < n) {
-          REFILL_STREAM_DONATE(14);
+          REFILL_STREAM(14);
 
           fe = tcodelen[(uint8_t)bs.bits];
           if (unlikely(!fe.len || fe.sym > 18)) goto err;
