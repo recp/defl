@@ -80,10 +80,7 @@ infl_raw_stream(defl_stream_t * __restrict stream) {
     bs.nbits -= shift;
   }
 
-  /* need 32 bits for header */
-  if (bs.nbits < 32) {
-    REFILL_STREAM(32);
-  }
+  REFILL_STREAM(32);
   
   header = (uint32_t)bs.bits;
   CONSUME(32);
@@ -91,8 +88,8 @@ infl_raw_stream(defl_stream_t * __restrict stream) {
   len  = header & 0xFFFF;
   nlen = header >> 16;
 
-  if (unlikely((len^(uint16_t)~nlen)|(dpos+len > dlen)))
-    return UNZ_ERR;
+  if (unlikely((len^(uint16_t)~nlen))) return UNZ_ERR;
+  if (unlikely(dpos+len > dlen))       return UNZ_EFULL;
 
   remlen = len;
   dst    = stream->dst + dpos;
@@ -358,6 +355,7 @@ infl_stream(infl_stream_t * __restrict stream,
 
   unz__bitstate_t bs;
   uint_fast8_t    btype, bfinal=0;
+  UnzResult       res;
 
   /* add new data */
   if (src && srclen > 0) {
@@ -373,6 +371,16 @@ infl_stream(infl_stream_t * __restrict stream,
     stream->bs.nbits  = 0;
     stream->bs.pbits  = 0;
     stream->bs.npbits = 0;
+    
+    /* initialize the bitstream by reading initial bits */
+    if (stream->bs.p < stream->bs.end) {
+      stream->bs.npbits = huff_read(&stream->bs.p, &stream->bs.pbits, stream->bs.end);
+    }
+    
+    /* clear raw state */
+    stream->raw_state.resuming = 0;
+    stream->raw_state.len      = 0;
+    stream->raw_state.remlen   = 0;
   }
   RESTORE();
 
@@ -389,7 +397,6 @@ infl_stream(infl_stream_t * __restrict stream,
       case INFL_STATE_FIXED:                  goto state_fixed;
       case INFL_STATE_DYNAMIC_HEADER:
       case INFL_STATE_DYNAMIC_CODELEN:
-      /* for dynamic states, we need to enter through case 2 to load state */
       case INFL_STATE_DYNAMIC_BLOCK: btype=2; goto state_blk_head_with_type;
       default:                                break;
     }
@@ -454,11 +461,9 @@ state_blk_head:
 state_raw:
         stream->stream_state = INFL_STATE_RAW;
         DONATE();
-        {
-          int res = infl_raw_stream(stream);
-          if (res == UNZ_UNFINISHED) return UNZ_UNFINISHED;
-          if (res < UNZ_OK)          goto   err;
-        }
+        res = infl_raw_stream(stream);
+        if      (res == UNZ_UNFINISHED) return UNZ_UNFINISHED;
+        else if (res < UNZ_OK)          return res;
         RESTORE();
         break;
         
@@ -466,11 +471,9 @@ state_raw:
 state_fixed:
         stream->stream_state = INFL_STATE_FIXED;
         DONATE();
-        {
-          int res = infl_block_stream(stream, &_tlitl_s, &_tdist_s);
-          if (res == UNZ_UNFINISHED) return UNZ_UNFINISHED;
-          if (res < UNZ_OK)          goto   err;
-        }
+        res = infl_block_stream(stream, &_tlitl_s, &_tdist_s);
+        if      (res == UNZ_UNFINISHED) return UNZ_UNFINISHED;
+        else if (res < UNZ_OK)          return res;
         RESTORE();
         break;
       case 2: {
@@ -493,7 +496,11 @@ state_fixed:
           i     = stream->dyn_state.i;
           memcpy(lens.lens, stream->dyn_state.lens, sizeof(lens.lens));
 
-          if (stream->stream_state == INFL_STATE_DYNAMIC_CODELEN) {
+          /* jump to the correct state based on where we left off */
+          if (stream->stream_state == INFL_STATE_DYNAMIC_HEADER) {
+            /* still reading the header codelens */
+            goto state_dyn_header_resume;
+          } else if (stream->stream_state == INFL_STATE_DYNAMIC_CODELEN) {
             /* rebuild tcodelen table when resuming */
             if (!huff_init_fast_lsb(tcodelen, lens.codelens, NULL, MAX_CODELEN_CODES))
               goto err;
@@ -524,10 +531,13 @@ state_fixed:
         stream->dyn_state.hclen = hclen;
         stream->dyn_state.n     = n;
 
-        for (i = 0; i < hclen; i++) {
+      state_dyn_header_resume:
+        for (i = (stream->dyn_state.i > 0 ? stream->dyn_state.i : 0); i < hclen; i++) {
           REFILL_STREAM(3);
           lens.codelens[ord[i]] = bs.bits & 0x7;
           CONSUME(3);
+          stream->dyn_state.i = i + 1;  /* Save progress */
+          memcpy(stream->dyn_state.lens, lens.lens, sizeof(lens.lens)); /* Save state */
         }
 
         if (!huff_init_fast_lsb(tcodelen,lens.codelens,NULL,MAX_CODELEN_CODES))
@@ -574,13 +584,11 @@ state_fixed:
       state_dyn_block:
         stream->stream_state = INFL_STATE_DYNAMIC_BLOCK;
         DONATE();
-        {
-          int res = infl_block_stream(stream,
-                                      &stream->dyn_state.tlit,
-                                      &stream->dyn_state.tdist);
-          if (res == UNZ_UNFINISHED) return UNZ_UNFINISHED;
-          if (res < UNZ_OK)          goto   err;
-        }
+        res = infl_block_stream(stream,
+                                &stream->dyn_state.tlit,
+                                &stream->dyn_state.tdist);
+        if      (res == UNZ_UNFINISHED) return UNZ_UNFINISHED;
+        else if (res < UNZ_OK)          return res;
         RESTORE();
       } break;
 
