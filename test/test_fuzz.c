@@ -41,15 +41,43 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
     if (size > 10) {
         infl_stream_t *stream = infl_init(output, MAX_OUTPUT_SIZE, 0);
         if (stream) {
-            /* Random chunk boundaries */
+            /* Test various streaming patterns */
             size_t pos = 0;
-            while (pos < size) {
-                size_t chunk = 1 + (data[pos] % 256);
+            int attempts = 0;
+            int result = UNZ_UNFINISHED;
+            
+            while (pos < size && attempts < 1000) {
+                size_t chunk = 1 + (data[pos] % 64);  /* 1-64 byte chunks */
                 if (pos + chunk > size) chunk = size - pos;
-                infl_include(stream, data + pos, chunk);
+                
+                result = infl_stream(stream, data + pos, chunk);
                 pos += chunk;
+                attempts++;
+                
+                if (result == UNZ_OK) {
+                    break;  /* Completed successfully */
+                } else if (result == UNZ_UNFINISHED) {
+                    continue;  /* Need more data */
+                } else {
+                    break;  /* Error occurred */
+                }
             }
-            infl(stream);
+            
+            /* Try final empty call to finish */
+            if (result == UNZ_UNFINISHED && pos >= size) {
+                result = infl_stream(stream, NULL, 0);
+            }
+            
+            infl_destroy(stream);
+        }
+        
+        /* Test byte-by-byte streaming */
+        stream = infl_init(output, MAX_OUTPUT_SIZE, 0);
+        if (stream) {
+            for (size_t i = 0; i < size && i < 100; i++) {
+                int result = infl_stream(stream, data + i, 1);
+                if (result == UNZ_OK || result < UNZ_OK) break;
+            }
             infl_destroy(stream);
         }
     }
