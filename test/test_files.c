@@ -133,7 +133,6 @@ static uint8_t* read_file(const char *path, size_t *size) {
     return data;
 }
 
-/* Print test result in cglm style with better formatting */
 static void print_test_result(const char* name, bool passed, double elapsed_time, const char* error_msg) {
     if (!passed) {
         fprintf(stderr, BOLDRED "  " FAIL_TEXT BOLDWHITE " %s " RESET, name);
@@ -655,6 +654,8 @@ static void test_streaming_edge_cases(void) {
     g_results.total_time += elapsed;
     print_test_result("small_data_streaming", passed, elapsed, passed ? NULL : error_msg);
     
+    infl_destroy(stream);
+    
     /* Test 2: ZLIB header streaming */
     start_time = get_time();
     
@@ -711,6 +712,7 @@ static void test_streaming_edge_cases(void) {
         
         infl_destroy(stream);
     }
+    
     g_results.total++;
     
     elapsed = get_time() - start_time;
@@ -758,6 +760,8 @@ static void test_streaming_edge_cases(void) {
     elapsed = get_time() - start_time;
     g_results.total_time += elapsed;
     print_test_result("chunked_streaming_64byte", passed, elapsed, passed ? NULL : error_msg);
+    
+    infl_destroy(stream);
 }
 
 /* Replace the debug streaming tests with a note about minimum chunk size */
