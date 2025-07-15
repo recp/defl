@@ -18,32 +18,37 @@
 #include "apicommon.h"
 
 #define REFILL_STREAM(req)                                                    \
-  do {                                                                        \
-    if (unlikely(bs.nbits < (req))) {                                         \
-      int take;                                                               \
-      do {                                                                    \
-        if ((take = min(64 - bs.nbits, bs.npbits)) != 64) {                   \
-          bs.bits   |= (bs.pbits&(((bitstream_t)1<<take)-1)) << bs.nbits;     \
-          bs.pbits >>= take;                                                  \
-          bs.nbits  += take;                                                  \
-          bs.npbits -= take;                                                  \
-        } else {                                                              \
-          bs.bits    = bs.pbits;                                              \
-          bs.nbits   = bs.npbits;                                             \
-          bs.pbits   = 0;                                                     \
-          bs.npbits  = 0;                                                     \
-        }                                                                     \
-        if (unlikely(!bs.npbits)) {                                           \
-          if (unlikely(bs.p >= bs.end)                                        \
-              && (!bs.chunk || !(bs.chunk = bs.chunk->next)                   \
-                  || !(bs.p = bs.chunk->p) || !(bs.end = bs.chunk->end))) {   \
-            if(bs.nbits) break; else { return UNZ_UNFINISHED; }               \
+  if (unlikely(bs.nbits < (req))) {                                           \
+    int take;                                                                 \
+    do {                                                                      \
+      if ((take = min(64 - bs.nbits, bs.npbits)) != 64) {                     \
+        bs.bits   |= (bs.pbits&(((bitstream_t)1<<take)-1)) << bs.nbits;       \
+        bs.pbits >>= take;                                                    \
+        bs.nbits  += take;                                                    \
+        bs.npbits -= take;                                                    \
+      } else {                                                                \
+        bs.bits    = bs.pbits;                                                \
+        bs.nbits   = bs.npbits;                                               \
+        bs.pbits   = 0;                                                       \
+        bs.npbits  = 0;                                                       \
+      }                                                                       \
+      if (unlikely(!bs.npbits)) {                                             \
+        if (unlikely(bs.p >= bs.end)) {                                       \
+          if (bs.chunk && bs.chunk->next) {                                   \
+            bs.chunk = bs.chunk->next;                                        \
+            bs.p     = bs.chunk->p;                                           \
+            bs.end   = bs.chunk->end;                                         \
+            if (!bs.p || !bs.end) {                                           \
+              if(bs.nbits) {break;} else {DONATE();return UNZ_UNFINISHED;}    \
+            }                                                                 \
+          } else {                                                            \
+            if(bs.nbits) {break;}   else {DONATE();return UNZ_UNFINISHED;}    \
           }                                                                   \
-          bs.npbits=huff_read(&bs.p,&bs.pbits,bs.end);                        \
         }                                                                     \
-      } while (unlikely(bs.nbits < (req) && bs.npbits));                      \
-    }                                                                         \
-  } while(0)
+        bs.npbits=huff_read(&bs.p,&bs.pbits,bs.end);                          \
+      }                                                                       \
+    } while (unlikely(bs.nbits < (req) && bs.npbits));                        \
+  }
 
 static UNZ_HOT
 UnzResult
@@ -54,7 +59,7 @@ infl_raw_stream(defl_stream_t * __restrict stream) {
   unsigned        dpos, dlen, nbytes, chkrem, n, remlen, i, simdlen;
   uint32_t        header, val;
   uint16_t        len, nlen;
-  
+
   /* check if we're resuming from saved state */
   if (stream->raw_state.resuming) {
     /* restore saved state */
@@ -80,8 +85,13 @@ infl_raw_stream(defl_stream_t * __restrict stream) {
     bs.nbits -= shift;
   }
 
+  /* need 32 bits for header */
   REFILL_STREAM(32);
-  
+  if (bs.nbits < 32) {
+    DONATE();
+    return UNZ_UNFINISHED;
+  }
+
   header = (uint32_t)bs.bits;
   CONSUME(32);
   
@@ -103,13 +113,6 @@ resume_copy:
   nbytes = bs.nbits >> 3;
   if (nbytes > 0 && remlen > 0) {
     nbytes = (nbytes < remlen) ? nbytes : remlen;
-    
-    /* additional safety check */
-    if (dpos + nbytes > dlen) {
-      stream->raw_state.resuming = 0;
-      return UNZ_EFULL;
-    }
-    
     if (nbytes <= 4) {
       val = (uint32_t)bs.bits;
       switch (nbytes) {
@@ -119,8 +122,7 @@ resume_copy:
         case 1: dst[0] = (uint8_t)val;
       }
     } else {
-      for (i = 0; i < nbytes; i++)
-        dst[i] = (uint8_t)(bs.bits >> (i << 3));
+      for (i = 0; i < nbytes; i++) dst[i] = (uint8_t)(bs.bits >> (i << 3));
     }
     bs.bits >>= (nbytes << 3);
     bs.nbits -= (int)(nbytes << 3);
@@ -131,17 +133,8 @@ resume_copy:
   /* flush bs.pbits */
   nbytes = bs.npbits >> 3;
   if (nbytes > 0 && remlen > 0) {
-    nbytes = (nbytes < remlen) ? nbytes : remlen;
-    
-    /* additional safety check */
-    if (dpos + (len - remlen) + nbytes > dlen) {
-      stream->raw_state.resuming = 0;
-      return UNZ_EFULL;
-    }
-    
-    for (i = 0; i < nbytes; i++) {
-      dst[i] = (uint8_t)(bs.pbits >> (i << 3));
-    }
+    nbytes     = (nbytes < remlen) ? nbytes : remlen;
+    for (i = 0; i < nbytes; i++) dst[i] = (uint8_t)(bs.pbits >> (i << 3));
     bs.pbits >>= (nbytes << 3);
     bs.npbits -= (int)(nbytes << 3);
     dst       += nbytes;
@@ -150,16 +143,22 @@ resume_copy:
 
   while (remlen > 0) {
     if (bs.p >= bs.end) {
-      if (!(bs.chunk = bs.chunk->next) || !bs.chunk->p || !bs.chunk->end) {
+      /* first check if current chunk was extended */
+      if (bs.chunk == stream->end && stream->end->end > bs.end) {
+        bs.end = stream->end->end;
+      } else if (!bs.chunk || !bs.chunk->next || !bs.chunk->next->p || !bs.chunk->next->end) {
         /* no more data available - save state and return */
         stream->raw_state.resuming = 1;
         stream->raw_state.remlen   = remlen;
-        stream->dstpos = dpos + (len - remlen);
+        stream->dstpos             = (size_t)(dst - stream->dst);
         DONATE();
         return UNZ_UNFINISHED;
+      } else {
+        /* advance to next chunk */
+        bs.chunk = bs.chunk->next;
+        bs.p     = bs.chunk->p;
+        bs.end   = bs.chunk->end;
       }
-      bs.p   = bs.chunk->p;
-      bs.end = bs.chunk->end;
     }
 
     p      = bs.p;
@@ -167,15 +166,6 @@ resume_copy:
 
     if (likely(chkrem > 0)) {
       n = (chkrem < remlen) ? chkrem : remlen;
-      
-      /* final safety check before copying */
-      if (dpos + (len - remlen) + n > dlen) {
-        stream->raw_state.resuming = 1;
-        stream->raw_state.remlen   = remlen;
-        stream->dstpos             = dpos + (len - remlen);
-        DONATE();
-        return UNZ_EFULL;
-      }
 
 #if defined(__builtin_prefetch)
       if (n >= 256) {
