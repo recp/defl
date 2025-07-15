@@ -24,21 +24,60 @@ def write_file(filename, data):
             f.write(data)
     print(f"Created: {path} ({len(data)} bytes)")
 
+def create_uncompressed_deflate(data):
+    """Create a DEFLATE stream with uncompressed blocks (BTYPE=0)"""
+    result = bytearray()
+    
+    # Process data in chunks of max 65535 bytes (max uncompressed block size)
+    MAX_BLOCK_SIZE = 65535
+    data_bytes = data if isinstance(data, bytes) else data.encode('utf-8')
+    
+    for i in range(0, len(data_bytes), MAX_BLOCK_SIZE):
+        chunk = data_bytes[i:i + MAX_BLOCK_SIZE]
+        chunk_len = len(chunk)
+        
+        # Determine if this is the final block
+        is_final = (i + MAX_BLOCK_SIZE >= len(data_bytes))
+        
+        # BFINAL (1 bit) and BTYPE (2 bits) - stored in LSB order
+        # BFINAL=1 if final block, BTYPE=00 for uncompressed
+        header_byte = 0x01 if is_final else 0x00  # BFINAL=1/0, BTYPE=00
+        result.append(header_byte)
+        
+        # LEN (2 bytes) - length of data
+        result.extend(struct.pack('<H', chunk_len))
+        
+        # NLEN (2 bytes) - one's complement of LEN
+        result.extend(struct.pack('<H', (~chunk_len) & 0xFFFF))
+        
+        # The actual data
+        result.extend(chunk)
+    
+    return bytes(result)
+
 def compress_file(input_path, output_path):
     """Compress a single file using zlib DEFLATE"""
     try:
         with open(input_path, 'rb') as f:
             data = f.read()
         
-        # Use zlib.compress with DEFLATE format (no header/trailer)
-        # wbits=-15 means raw DEFLATE without zlib header
-        compressed = zlib.compress(data, level=6, wbits=-15)
+        # Check if this file should use uncompressed blocks
+        filename = os.path.basename(input_path)
+        if filename.startswith('uncompressed_'):
+            # Use uncompressed DEFLATE blocks
+            compressed = create_uncompressed_deflate(data)
+            compression_type = "uncompressed"
+        else:
+            # Use zlib.compress with DEFLATE format (no header/trailer)
+            # wbits=-15 means raw DEFLATE without zlib header
+            compressed = zlib.compress(data, level=6, wbits=-15)
+            compression_type = "compressed"
         
         with open(output_path, 'wb') as f:
             f.write(compressed)
         
         ratio = len(compressed) / len(data) * 100 if len(data) > 0 else 0
-        print(f"Compressed: {os.path.basename(input_path)} ({len(data)} -> {len(compressed)} bytes, {ratio:.1f}%)")
+        print(f"{compression_type.capitalize()}: {os.path.basename(input_path)} ({len(data)} -> {len(compressed)} bytes, {ratio:.1f}%)")
         
         return True
         
@@ -52,43 +91,47 @@ def compress_file_variants(input_path, base_output_path):
         with open(input_path, 'rb') as f:
             data = f.read()
         
-        if len(data) == 0:
+        filename = os.path.basename(input_path)
+        
+        # Check if this file should use uncompressed blocks
+        if filename.startswith('uncompressed_'):
+            compressed = create_uncompressed_deflate(data)
+            variant_name = "uncompressed"
+        elif len(data) == 0:
             # Special case for empty files
             compressed = zlib.compress(data, level=1, wbits=-15)
-            with open(base_output_path, 'wb') as f:
-                f.write(compressed)
-            return True
-        
-        variants = []
-        
-        # Default compression (level 6)
-        compressed = zlib.compress(data, level=6, wbits=-15)
-        variants.append(("default", compressed))
-        
-        # For small files, try different compression strategies
-        if len(data) < 1000:
-            # No compression (store only) - force with level 0
-            try:
-                store_only = zlib.compress(data, level=0, wbits=-15)
-                variants.append(("store", store_only))
-            except:
-                pass
-                
-            # Maximum compression
-            try:
-                max_comp = zlib.compress(data, level=9, wbits=-15)
-                variants.append(("max", max_comp))
-            except:
-                pass
-        
-        # Choose the best variant (usually default is fine)
-        best_name, best_compressed = variants[0]
+            variant_name = "default"
+        else:
+            variants = []
+            
+            # Default compression (level 6)
+            compressed = zlib.compress(data, level=6, wbits=-15)
+            variants.append(("default", compressed))
+            
+            # For small files, try different compression strategies
+            if len(data) < 1000:
+                # No compression (store only) - force with level 0
+                try:
+                    store_only = zlib.compress(data, level=0, wbits=-15)
+                    variants.append(("store", store_only))
+                except:
+                    pass
+                    
+                # Maximum compression
+                try:
+                    max_comp = zlib.compress(data, level=9, wbits=-15)
+                    variants.append(("max", max_comp))
+                except:
+                    pass
+            
+            # Choose the best variant (usually default is fine)
+            variant_name, compressed = variants[0]
         
         with open(base_output_path, 'wb') as f:
-            f.write(best_compressed)
+            f.write(compressed)
         
-        ratio = len(best_compressed) / len(data) * 100 if len(data) > 0 else 0
-        print(f"Compressed: {os.path.basename(input_path)} ({len(data)} -> {len(best_compressed)} bytes, {ratio:.1f}%) [{best_name}]")
+        ratio = len(compressed) / len(data) * 100 if len(data) > 0 else 0
+        print(f"Compressed: {os.path.basename(input_path)} ({len(data)} -> {len(compressed)} bytes, {ratio:.1f}%) [{variant_name}]")
         
         return True
         
@@ -327,10 +370,14 @@ int main(int argc, char *argv[]) {
     skewed.append(ord('D'))
     write_file("skewed_freq", skewed)
     
-    # 27. Specific DEFLATE test cases
-    # Tests for uncompressed blocks
+    # 27. Specific DEFLATE test cases - RENAMED TO USE UNCOMPRESSED BLOCKS
+    # Tests for uncompressed blocks - these will actually use BTYPE=0
     write_file("uncompressed_small", b"DATA" * 5)
     write_file("uncompressed_medium", b"UNCOMPRESSED" * 100)
+    write_file("uncompressed_empty", b"")  # Empty uncompressed block
+    write_file("uncompressed_single", b"X")  # Single byte uncompressed
+    write_file("uncompressed_max", b"M" * 65535)  # Maximum size uncompressed block
+    write_file("uncompressed_multi", b"FIRST" * 20000 + b"SECOND" * 20000)  # Multiple uncompressed blocks
     
     # Tests for static Huffman
     write_file("static_huffman_1", "abcdefghijklmnopqrstuvwxyz" * 20)
@@ -464,6 +511,14 @@ int main(int argc, char *argv[]) {
         css_content += f"  padding: {i % 5}px;\n"
         css_content += f"}}\n\n"
     write_file("css_content", css_content)
+    
+    # 34. Additional uncompressed block tests
+    # Test various sizes and patterns specifically for uncompressed blocks
+    write_file("uncompressed_boundary_1", b"X" * 65534)  # Just under max
+    write_file("uncompressed_boundary_2", b"Y" * 65535)  # Exactly max
+    write_file("uncompressed_multi_exact", b"A" * 65535 + b"B" * 65535 + b"C" * 100)  # Multiple full blocks + partial
+    write_file("uncompressed_alternating", bytes(i & 0xFF for i in range(1000)))  # Binary pattern uncompressed
+    write_file("uncompressed_text", "This is uncompressed text that will be stored as-is in DEFLATE blocks." * 50)
 
 def compress_all_files():
     """Compress all files from raw/ to compressed/"""
@@ -492,6 +547,7 @@ def compress_all_files():
     success_count = 0
     total_original = 0
     total_compressed = 0
+    uncompressed_count = 0
     
     # Special handling for specific test cases
     special_cases = {
@@ -505,6 +561,10 @@ def compress_all_files():
     for filename in raw_files:
         input_path = os.path.join(raw_dir, filename)
         output_path = os.path.join(compressed_dir, filename)
+        
+        # Count uncompressed files
+        if filename.startswith('uncompressed_'):
+            uncompressed_count += 1
         
         # Use variant compression for special cases, regular for others
         if filename in special_cases:
@@ -522,6 +582,7 @@ def compress_all_files():
     
     print(f"\nCompression complete!")
     print(f"Successfully compressed: {success_count}/{len(raw_files)} files")
+    print(f"Files using uncompressed blocks (BTYPE=0): {uncompressed_count}")
     
     if total_original > 0:
         overall_ratio = total_compressed / total_original * 100
