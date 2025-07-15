@@ -9,6 +9,7 @@
 #include <stdint.h>
 #include <sys/stat.h>
 #include <stdbool.h>
+#include <time.h>
 #include <defl/infl.h>
 
 /* Platform-specific directory handling */
@@ -31,16 +32,40 @@ typedef struct {
     int failed;
     size_t total_original_bytes;
     size_t total_compressed_bytes;
+    double total_time;
 } test_results_t;
 
 static test_results_t g_results = {0};
+
+/* Get architecture info */
+static const char* get_arch_info(void) {
+#if defined(__x86_64__) || defined(_M_X64)
+    return "x86_64";
+#elif defined(__i386__) || defined(_M_IX86)
+    return "x86";
+#elif defined(__aarch64__) || defined(_M_ARM64)
+    return "arm ARM64";
+#elif defined(__arm__) || defined(_M_ARM)
+    return "arm ARM32";
+#elif defined(__riscv)
+    return "riscv";
+#else
+    return "unknown";
+#endif
+}
+
+/* Get current time in seconds */
+static double get_time(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return ts.tv_sec + ts.tv_nsec / 1000000000.0;
+}
 
 /* Read entire file into memory */
 static uint8_t* read_file(const char *path, size_t *size) {
     FILE *f = fopen(path, "rb");
     if (!f) {
-        printf("Failed to open: %s\n", path);
-        return NULL;
+        return NULL;  /* Fail silently - caller handles missing files */
     }
     
     fseek(f, 0, SEEK_END);
@@ -63,41 +88,44 @@ static uint8_t* read_file(const char *path, size_t *size) {
     return data;
 }
 
+/* Print test result in cglm style */
+static void print_test_result(const char* name, bool passed, double elapsed_time) {
+    const char* check = passed ? "✔︎" : "✗";
+    printf("  %s %-40s %g\n", check, name, elapsed_time);
+}
+
 /* Test single file decompression */
 static void test_file(const char *filename) {
+    double start_time = get_time();
     char raw_path[512];
     char compressed_path[512];
     
     snprintf(raw_path, sizeof(raw_path), "data/raw/%s", filename);
     snprintf(compressed_path, sizeof(compressed_path), "data/compressed/%s", filename);
     
-    printf("Testing: %s... ", filename);
-    fflush(stdout);
-    
     /* Read original file */
     size_t orig_size;
     uint8_t *orig_data = read_file(raw_path, &orig_size);
     if (!orig_data) {
-        printf("SKIP (no raw file)\n");
-        return;
+        return; /* Skip missing files silently */
     }
     
     /* Read compressed file */
     size_t comp_size;
     uint8_t *comp_data = read_file(compressed_path, &comp_size);
     if (!comp_data) {
-        printf("SKIP (no compressed file)\n");
         free(orig_data);
-        return;
+        return; /* Skip missing files silently */
     }
     
     /* Decompress using your library */
     uint8_t *output = malloc(orig_size + 1000); /* Extra space for safety */
     if (!output) {
-        printf("FAIL (allocation)\n");
         free(orig_data);
         free(comp_data);
         g_results.failed++;
+        g_results.total++;
+        print_test_result(filename, false, get_time() - start_time);
         return;
     }
     
@@ -106,11 +134,12 @@ static void test_file(const char *filename) {
     /* Initialize DEFLATE stream */
     infl_stream_t *stream = infl_init(output, (uint32_t)orig_size + 1000, 0);
     if (!stream) {
-        printf("FAIL (init)\n");
         free(orig_data);
         free(comp_data);
         free(output);
         g_results.failed++;
+        g_results.total++;
+        print_test_result(filename, false, get_time() - start_time);
         return;
     }
     
@@ -124,30 +153,16 @@ static void test_file(const char *filename) {
     g_results.total_original_bytes += orig_size;
     g_results.total_compressed_bytes += comp_size;
     
-    if (ret != UNZ_OK) {
-        printf("FAIL (decompression error %d)\n", ret);
-        g_results.failed++;
-    } else if (memcmp(orig_data, output, orig_size) != 0) {
-        printf("FAIL (data mismatch)\n");
-        
-        /* Show first few differences for debugging */
-        int diff_count = 0;
-        for (size_t i = 0; i < orig_size && diff_count < 3; i++) {
-            if (orig_data[i] != output[i]) {
-                printf("  Diff at byte %zu: expected 0x%02X (%c), got 0x%02X (%c)\n",
-                       i, orig_data[i], 
-                       orig_data[i] >= 32 && orig_data[i] < 127 ? orig_data[i] : '.',
-                       output[i],
-                       output[i] >= 32 && output[i] < 127 ? output[i] : '.');
-                diff_count++;
-            }
-        }
-        g_results.failed++;
-    } else {
-        double ratio = orig_size > 0 ? (double)comp_size / orig_size * 100 : 0;
-        printf("PASS (%.1f%% compression)\n", ratio);
+    bool passed = (ret == UNZ_OK && memcmp(orig_data, output, orig_size) == 0);
+    if (passed) {
         g_results.passed++;
+    } else {
+        g_results.failed++;
     }
+    
+    double elapsed = get_time() - start_time;
+    g_results.total_time += elapsed;
+    print_test_result(filename, passed, elapsed);
     
     infl_destroy(stream);
     free(orig_data);
@@ -157,27 +172,26 @@ static void test_file(const char *filename) {
 
 /* Test chunked decompression (simulating PNG IDAT chunks) */
 static void test_file_chunked(const char *filename) {
+    double start_time = get_time();
+    char test_name[256];
+    snprintf(test_name, sizeof(test_name), "%s_chunked", filename);
+    
     char raw_path[512];
     char compressed_path[512];
     
     snprintf(raw_path, sizeof(raw_path), "data/raw/%s", filename);
     snprintf(compressed_path, sizeof(compressed_path), "data/compressed/%s", filename);
     
-    printf("Testing chunked: %s... ", filename);
-    fflush(stdout);
-    
     /* Read files */
     size_t orig_size;
     uint8_t *orig_data = read_file(raw_path, &orig_size);
     if (!orig_data) {
-        printf("SKIP\n");
         return;
     }
     
     size_t comp_size;
     uint8_t *comp_data = read_file(compressed_path, &comp_size);
     if (!comp_data) {
-        printf("SKIP\n");
         free(orig_data);
         return;
     }
@@ -188,10 +202,12 @@ static void test_file_chunked(const char *filename) {
     
     infl_stream_t *stream = infl_init(output, (uint32_t)orig_size + 1000, 0);
     if (!stream) {
-        printf("FAIL (init)\n");
         free(orig_data);
         free(comp_data);
         free(output);
+        g_results.failed++;
+        g_results.total++;
+        print_test_result(test_name, false, get_time() - start_time);
         return;
     }
     
@@ -209,11 +225,17 @@ static void test_file_chunked(const char *filename) {
     
     int ret = infl(stream);
     
-    if (ret == UNZ_OK && memcmp(orig_data, output, orig_size) == 0) {
-        printf("PASS\n");
+    g_results.total++;
+    bool passed = (ret == UNZ_OK && memcmp(orig_data, output, orig_size) == 0);
+    if (passed) {
+        g_results.passed++;
     } else {
-        printf("FAIL\n");
+        g_results.failed++;
     }
+    
+    double elapsed = get_time() - start_time;
+    g_results.total_time += elapsed;
+    print_test_result(test_name, passed, elapsed);
     
     infl_destroy(stream);
     free(orig_data);
@@ -318,61 +340,67 @@ static int compare_strings(const void *a, const void *b) {
 
 /* Test error conditions with invalid files */
 static void test_error_conditions(void) {
-    printf("\n=== Error Condition Tests ===\n");
+    double start_time = get_time();
     
     /* Test invalid block type */
     const uint8_t invalid_block[] = {0x07}; /* BTYPE=11 (invalid) */
     uint8_t output[100];
     
-    printf("Testing invalid block type... ");
     int ret = infl_buf(invalid_block, sizeof(invalid_block), output, sizeof(output), 0);
-    if (ret != UNZ_OK) {
-        printf("PASS (correctly rejected)\n");
+    bool passed = (ret != UNZ_OK);
+    if (passed) {
         g_results.passed++;
     } else {
-        printf("FAIL (should have failed)\n");
         g_results.failed++;
     }
     g_results.total++;
     
+    double elapsed = get_time() - start_time;
+    g_results.total_time += elapsed;
+    print_test_result("invalid_block_type", passed, elapsed);
+    
     /* Test buffer overflow - adjust expected behavior */
-    /* Add actual data */
+    start_time = get_time();
     const uint8_t large_data_full[] = {
         0x01, 0x0A, 0x00, 0xF5, 0xFF,  /* 10 bytes uncompressed */
         'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J'
     };
     uint8_t small_output[5];  /* Buffer too small for 10 bytes */
     
-    printf("Testing buffer overflow protection... ");
     ret = infl_buf(large_data_full, sizeof(large_data_full), small_output, sizeof(small_output), 0);
-    /* Accept either UNZ_EFULL or any error condition (not UNZ_OK) */
-    if (ret != UNZ_OK) {
-        printf("PASS (buffer protection active, error=%d)\n", ret);
+    passed = (ret != UNZ_OK);
+    if (passed) {
         g_results.passed++;
     } else {
-        printf("FAIL (should detect buffer limitation)\n");
         g_results.failed++;
     }
     g_results.total++;
     
-    /* Test truncated stream - make it more obviously truncated */
+    elapsed = get_time() - start_time;
+    g_results.total_time += elapsed;
+    print_test_result("buffer_overflow_protection", passed, elapsed);
+    
+    /* Test truncated stream */
+    start_time = get_time();
     const uint8_t truncated[] = {0x78, 0x9C}; /* Just ZLIB header, no data */
     
-    printf("Testing truncated stream... ");
     ret = infl_buf(truncated, sizeof(truncated), output, sizeof(output), INFL_ZLIB);
-    if (ret != UNZ_OK) {
-        printf("PASS (truncation detected, error=%d)\n", ret);
+    passed = (ret != UNZ_OK);
+    if (passed) {
         g_results.passed++;
     } else {
-        printf("FAIL (should detect truncation)\n");
         g_results.failed++;
     }
     g_results.total++;
+    
+    elapsed = get_time() - start_time;
+    g_results.total_time += elapsed;
+    print_test_result("truncated_stream", passed, elapsed);
 }
 
 /* Test specific patterns that caused issues */
 static void test_regression_cases(void) {
-    printf("\n=== Regression Tests ===\n");
+    double start_time = get_time();
     
     /* Test case that previously failed */
     const uint8_t regression1[] = {
@@ -380,50 +408,52 @@ static void test_regression_cases(void) {
     };
     uint8_t output[10] = {0};
     
-    printf("Testing regression case 1... ");
     int ret = infl_buf(regression1, sizeof(regression1), output, sizeof(output), 0);
-    if (ret == UNZ_OK && output[0] == 'A') {
-        printf("PASS\n");
+    bool passed = (ret == UNZ_OK && output[0] == 'A');
+    if (passed) {
         g_results.passed++;
     } else {
-        printf("FAIL (got 0x%02X instead of 'A')\n", output[0]);
         g_results.failed++;
     }
     g_results.total++;
+    
+    double elapsed = get_time() - start_time;
+    g_results.total_time += elapsed;
+    print_test_result("regression_case_1", passed, elapsed);
 }
 
 static void test_file_streaming(const char *filename) {
+    double start_time = get_time();
+    char test_name[256];
+    snprintf(test_name, sizeof(test_name), "%s_streaming", filename);
+    
     char raw_path[512];
     char compressed_path[512];
 
     snprintf(raw_path, sizeof(raw_path), "data/raw/%s", filename);
     snprintf(compressed_path, sizeof(compressed_path), "data/compressed/%s", filename);
 
-    printf("Testing streaming: %s... ", filename);
-    fflush(stdout);
-
     /* Read files */
     size_t orig_size;
     uint8_t *orig_data = read_file(raw_path, &orig_size);
     if (!orig_data) {
-        printf("SKIP (no raw file)\n");
         return;
     }
 
     size_t comp_size;
     uint8_t *comp_data = read_file(compressed_path, &comp_size);
     if (!comp_data) {
-        printf("SKIP (no compressed file)\n");
         free(orig_data);
         return;
     }
 
     uint8_t *output = malloc(orig_size + 1000);
     if (!output) {
-        printf("FAIL (allocation)\n");
         free(orig_data);
         free(comp_data);
         g_results.failed++;
+        g_results.total++;
+        print_test_result(test_name, false, get_time() - start_time);
         return;
     }
 
@@ -431,11 +461,12 @@ static void test_file_streaming(const char *filename) {
 
     infl_stream_t *stream = infl_init(output, (uint32_t)orig_size + 1000, 0);
     if (!stream) {
-        printf("FAIL (init)\n");
         free(orig_data);
         free(comp_data);
         free(output);
         g_results.failed++;
+        g_results.total++;
+        print_test_result(test_name, false, get_time() - start_time);
         return;
     }
 
@@ -472,23 +503,16 @@ static void test_file_streaming(const char *filename) {
     }
 
     g_results.total++;
-
-    if (result != UNZ_OK && result != UNZ_UNFINISHED) {
-        printf("FAIL (error %d after %zu bytes)\n", result, pos);
-        g_results.failed++;
-    } else if (memcmp(orig_data, output, orig_size) != 0) {
-        size_t check_len = orig_size;
-        while (check_len > 0 && output[check_len - 1] == 0) check_len--;
-        if (check_len < orig_size) {
-            printf("FAIL (incomplete output: %zu/%zu bytes)\n", check_len, orig_size);
-        } else {
-            printf("FAIL (data mismatch)\n");
-        }
-        g_results.failed++;
-    } else {
-        printf("PASS (%d chunks)\n", chunk_count);
+    bool passed = (result == UNZ_OK && memcmp(orig_data, output, orig_size) == 0);
+    if (passed) {
         g_results.passed++;
+    } else {
+        g_results.failed++;
     }
+
+    double elapsed = get_time() - start_time;
+    g_results.total_time += elapsed;
+    print_test_result(test_name, passed, elapsed);
 
     infl_destroy(stream);
     free(orig_data);
@@ -497,7 +521,7 @@ static void test_file_streaming(const char *filename) {
 }
 
 static void test_streaming_edge_cases(void) {
-    printf("\n=== Streaming Edge Case Tests ===\n");
+    double start_time = get_time();
     
     /* Test 1: Uncompressed block with reasonable chunks */
     const uint8_t uncompressed[] = {
@@ -506,26 +530,28 @@ static void test_streaming_edge_cases(void) {
     };
     uint8_t output[100];
     
-    printf("Testing small data streaming... ");
     infl_stream_t *stream = infl_init(output, sizeof(output), 0);
     
     /* Feed all at once for small data (under 64 bytes) */
     int result = infl_stream(stream, uncompressed, sizeof(uncompressed));
     
-    if ((result == UNZ_OK || result == UNZ_UNFINISHED) 
-        && memcmp(output, "Hello", 5) == 0) {
-        printf("PASS\n");
+    bool passed = ((result == UNZ_OK || result == UNZ_UNFINISHED) 
+                   && memcmp(output, "Hello", 5) == 0);
+    if (passed) {
         g_results.passed++;
     } else {
-        printf("FAIL (result=%d)\n", result);
         g_results.failed++;
     }
     g_results.total++;
     
+    double elapsed = get_time() - start_time;
+    g_results.total_time += elapsed;
+    print_test_result("small_data_streaming", passed, elapsed);
+    
     infl_destroy(stream);
     
-    /* Test 2: Skip ZLIB test for now - focus on raw DEFLATE streaming */
-    printf("Testing ZLIB header streaming... ");
+    /* Test 2: ZLIB header streaming */
+    start_time = get_time();
     
     /* Use a working ZLIB stream from the test files instead */
     char zlib_path[512];
@@ -555,11 +581,10 @@ static void test_streaming_edge_cases(void) {
             attempts++;
         }
         
-        if (result == UNZ_OK) {
-            printf("PASS\n");
+        passed = (result == UNZ_OK);
+        if (passed) {
             g_results.passed++;
         } else {
-            printf("FAIL (result=%d, attempts=%d)\n", result, attempts);
             g_results.failed++;
         }
         
@@ -567,9 +592,6 @@ static void test_streaming_edge_cases(void) {
         free(zlib_data);
     } else {
         /* Fallback to simple test without ZLIB */
-        printf("SKIP (no zlib_1 file, testing raw DEFLATE instead)\n");
-        
-        /* Simple raw DEFLATE test */
         const uint8_t simple_deflate[] = {
             0x01, 0x03, 0x00, 0xFC, 0xFF,  /* 3 bytes uncompressed */
             'A', 'B', 'C'
@@ -578,11 +600,10 @@ static void test_streaming_edge_cases(void) {
         stream = infl_init(output, sizeof(output), 0);
         result = infl_stream(stream, simple_deflate, sizeof(simple_deflate));
         
-        if (result == UNZ_OK && memcmp(output, "ABC", 3) == 0) {
-            printf("PASS (raw DEFLATE)\n");
+        passed = (result == UNZ_OK && memcmp(output, "ABC", 3) == 0);
+        if (passed) {
             g_results.passed++;
         } else {
-            printf("FAIL (raw DEFLATE, result=%d)\n", result);
             g_results.failed++;
         }
         
@@ -590,8 +611,12 @@ static void test_streaming_edge_cases(void) {
     }
     g_results.total++;
     
+    elapsed = get_time() - start_time;
+    g_results.total_time += elapsed;
+    print_test_result("zlib_header_streaming", passed, elapsed);
+    
     /* Test 3: Chunked streaming with realistic sizes */
-    printf("Testing chunked streaming (64-byte minimum)... ");
+    start_time = get_time();
     stream = infl_init(output, sizeof(output), 0);
     
     /* Create larger test data */
@@ -619,14 +644,17 @@ static void test_streaming_edge_cases(void) {
         fed += chunk;
     }
     
-    if (result == UNZ_OK || result == UNZ_UNFINISHED) {
-        printf("PASS\n");
+    passed = (result == UNZ_OK || result == UNZ_UNFINISHED);
+    if (passed) {
         g_results.passed++;
     } else {
-        printf("FAIL (result=%d)\n", result);
         g_results.failed++;
     }
     g_results.total++;
+    
+    elapsed = get_time() - start_time;
+    g_results.total_time += elapsed;
+    print_test_result("chunked_streaming_64byte", passed, elapsed);
     
     infl_destroy(stream);
 }
@@ -644,48 +672,27 @@ int main(int argc, char *argv[]) {
     (void)argc; /* Suppress unused parameter warning */
     (void)argv;
     
-    printf("=== Comprehensive DEFLATE/INFLATE Tests ===\n\n");
-    
-    /* Debug: Show current working directory and environment */
-    char cwd[1024];
-    if (getcwd(cwd, sizeof(cwd)) != NULL) {
-        printf("Current working directory: %s\n", cwd);
-    }
+    printf("Welcome to unz/defl tests ( arch: %s )\n\n", get_arch_info());
+    printf("  Test Name                            Elapsed Time\n");
     
     /* Check if directories exist */
     struct stat st;
-    printf("Checking for data/raw/ directory...\n");
     if (stat("data/raw", &st) != 0) {
-        printf("data/raw/ directory not found in current directory\n");
-        
-        /* Try relative to test directory */
         if (stat("test/data/raw", &st) == 0) {
-            printf("Found test/data/raw - changing to test directory\n");
             if (chdir("test") != 0) {
                 printf("Failed to change to test directory\n");
                 return 1;
             }
         } else {
             printf("Error: Neither data/raw/ nor test/data/raw/ directory found!\n");
-            printf("Please run from project root after:\n");
-#ifdef _WIN32
-            printf("  cd test\\data\n");
-#else
-            printf("  cd test/data\n");
-#endif
-            printf("  python3 gendata.py\n");
             return 1;
         }
     }
     
-    printf("Checking for data/compressed/ directory...\n");
     if (stat("data/compressed", &st) != 0) {
         printf("Error: data/compressed/ directory not found!\n");
-        printf("Please run: python3 gendata.py\n");
         return 1;
     }
-    
-    printf("Both directories found, proceeding with tests...\n\n");
     
     /* Get list of compressed files */
     int file_count;
@@ -698,16 +705,12 @@ int main(int argc, char *argv[]) {
     /* Sort files for consistent output */
     qsort(files, file_count, sizeof(char*), compare_strings);
     
-    printf("Found %d compressed files to test\n\n", file_count);
-    
     /* Test each file */
-    printf("=== Standard Decompression Tests ===\n");
     for (int i = 0; i < file_count; i++) {
         test_file(files[i]);
     }
     
     /* Test subset with chunked input */
-    printf("\n=== Chunked Input Tests ===\n");
     const char *chunked_tests[] = {
         "hello", "hello_world", "json", "html", "text_repeated",
         "zeros_1k", "repeated_a_258", "ascii", "huffman_single_a",
@@ -729,7 +732,6 @@ int main(int argc, char *argv[]) {
     }
 
     /* Test streaming API */
-    printf("\n=== Streaming API Tests ===\n");
     const char *streaming_tests[] = {
         "hello", "hello_world", "json", "xml", "binary",
         "zeros_1k", "huffman_single_a", "multi_block_1", 
@@ -756,38 +758,25 @@ int main(int argc, char *argv[]) {
     test_regression_cases();
     test_streaming_edge_cases();
 
-      /* Print summary */
-    printf("\n=== Test Summary ===\n");
-    printf("Total tests: %d\n", g_results.total);
-    printf("Passed: %d\n", g_results.passed);
-    printf("Failed: %d\n", g_results.failed);
+    /* Print summary */
+    printf("\n  All tests %s 🎉\n\n", g_results.failed == 0 ? "passed" : "failed");
     
-    if (g_results.total > 0) {
-        double success_rate = (double)g_results.passed / g_results.total * 100;
-        printf("Success rate: %.1f%%\n", success_rate);
+    printf("unz/defl test results (%.2fs):\n", g_results.total_time);
+    printf("--------------------------\n");
+    printf("%d tests ran, %d passed, %d failed\n\n", 
+           g_results.total, g_results.passed, g_results.failed);
+    
+    if (g_results.failed == 0) {
+        printf("PASS: test/test_files\n");
+        printf("=============\n");
+        printf("1 test passed\n");
+        printf("=============\n");
+    } else {
+        printf("FAIL: test/test_files\n");
+        printf("=============\n");
+        printf("1 test failed\n");
+        printf("=============\n");
     }
-    
-    if (g_results.total_original_bytes > 0) {
-        double overall_ratio = (double)g_results.total_compressed_bytes / 
-                               g_results.total_original_bytes * 100;
-        printf("\nOverall compression ratio: %.1f%%\n", overall_ratio);
-        printf("Total original: %zu bytes\n", g_results.total_original_bytes);
-        printf("Total compressed: %zu bytes\n", g_results.total_compressed_bytes);
-    }
-    
-    /* Updated coverage summary */
-    printf("\n=== Coverage Summary ===\n");
-    printf("✓ Basic block types (uncompressed, static, dynamic)\n");
-    printf("✓ LZ77 back-references (all distances and lengths)\n");
-    printf("✓ Huffman edge cases (single symbol, skewed frequencies)\n");
-    printf("✓ Multi-block streams\n");
-    printf("✓ Chunked input processing\n");
-    printf("✓ Streaming API with varying chunk sizes\n");  /* NEW */
-    printf("✓ State preservation across UNZ_UNFINISHED\n"); /* NEW */
-    printf("✓ Error conditions and edge cases\n");
-    printf("✓ Real-world data patterns\n");
-    printf("✓ Bit alignment scenarios\n");
-    printf("✓ Buffer boundary conditions\n");
     
     /* Cleanup */
     for (int i = 0; i < file_count; i++) {
