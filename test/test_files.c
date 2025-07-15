@@ -687,6 +687,8 @@ static void test_streaming_edge_cases(void) {
     g_results.total_time += elapsed;
     print_test_result("small_data_streaming", passed, elapsed, passed ? NULL : error_msg, passed ? details : NULL);
     
+    infl_destroy(stream);
+    
     /* Test 2: ZLIB header streaming */
     start_time = get_time();
     
@@ -801,6 +803,8 @@ static void test_streaming_edge_cases(void) {
     elapsed = get_time() - start_time;
     g_results.total_time += elapsed;
     print_test_result("chunked_streaming_64byte", passed, elapsed, passed ? NULL : error_msg, passed ? details : NULL);
+    
+    infl_destroy(stream);
 }
 
 /* Replace the debug streaming tests with a note about minimum chunk size */
