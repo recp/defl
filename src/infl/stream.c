@@ -273,7 +273,7 @@ infl_strm_blk(defl_stream_t          * __restrict stream,
       break;
     case BLOCK_STATE_LENGTH:
       len = saved_len;
-      goto state_distance;
+      goto distance;
     case BLOCK_STATE_BACKREF:
       len  = copy_remaining;
       dist = saved_dist;
@@ -317,7 +317,7 @@ infl_strm_blk(defl_stream_t          * __restrict stream,
     stream->ss.blk.state = BLOCK_STATE_LENGTH;
     stream->ss.blk.len   = len;
 
-  state_distance:
+  distance:
     REFILL_STREAM_BLK(29);
 
     dist = huff_decode_lsb_ext(tdist, bs.bits, &used);
@@ -341,7 +341,7 @@ infl_strm_blk(defl_stream_t          * __restrict stream,
 
     src = (unsigned)(dpos - dist);
 
-  state_backref:
+  backref:
     /* save state for potential pause */
     stream->ss.blk.state          = BLOCK_STATE_BACKREF;
     stream->ss.blk.len            = len;
@@ -442,6 +442,7 @@ infl_stream(infl_stream_t * __restrict stream,
 
   unz__bitstate_t bs;
   uint_fast8_t    btype, bfinal=0;
+  UnzResult       res;
 
   /* add new data */
   if (src && srclen > 0) {
@@ -471,14 +472,13 @@ infl_stream(infl_stream_t * __restrict stream,
 
     /* jump to appropriate state */
     switch (stream->ss.state) {
-      case INFL_STATE_HEADER:                 goto state_header;
-      case INFL_STATE_BLOCK_HEADER:           goto state_blk_head;
-      case INFL_STATE_RAW:                    goto state_raw;
-      case INFL_STATE_FIXED:                  goto state_fixed;
+      case INFL_STATE_HEADER:                 goto hdr;
+      case INFL_STATE_BLOCK_HEADER:           goto blk_head;
+      case INFL_STATE_RAW:                    goto raw;
+      case INFL_STATE_FIXED:                  goto fixed;
       case INFL_STATE_DYNAMIC_HEADER:
       case INFL_STATE_DYNAMIC_CODELEN:
-      /* for dynamic states, we need to enter through case 2 to load state */
-      case INFL_STATE_DYNAMIC_BLOCK: btype=2; goto state_blk_head_with_type;
+      case INFL_STATE_DYNAMIC_BLOCK: btype=2; goto blk_head_resume;
       case INFL_STATE_DONE:                   return UNZ_OK;  /* already done */
       default:                                break;
     }
@@ -505,7 +505,7 @@ infl_stream(infl_stream_t * __restrict stream,
   }
   RESTORE();
 
-state_header:
+hdr:
   if (stream->flags == 1 && unlikely(!stream->header)) {
     unz_chunk_t *tmp;
     size_t       avail;
@@ -532,7 +532,7 @@ state_header:
 
   bfinal = stream->ss.bfinal;
   
-state_blk_head:
+blk_head:
   while (!bfinal && bs.chunk) {
     stream->ss.state = INFL_STATE_BLOCK_HEADER;
 
@@ -541,30 +541,30 @@ state_blk_head:
     btype  = (bs.bits >> 1) & 0x3;
     CONSUME(3);
 
-  state_blk_head_with_type:
+  blk_head_resume:
     /* save block state */
     stream->ss.bfinal = bfinal;
     stream->ss.btype  = btype;
 
     switch (btype) {
       case 0:
-state_raw:
+raw:
         stream->ss.state = INFL_STATE_RAW;
         DONATE();
         {
-          int res = infl_strm_raw(stream);
+          res = infl_strm_raw(stream);
           if (res == UNZ_UNFINISHED) return UNZ_UNFINISHED;
           if (res < UNZ_OK)          goto   err;
+          RESTORE();
         }
-        RESTORE();
         break;
         
       case 1:
-state_fixed:
+fixed:
         stream->ss.state = INFL_STATE_FIXED;
         DONATE();
         {
-          int res = infl_strm_blk(stream, &_tlitl_s, &_tdist_s);
+          res = infl_strm_blk(stream, &_tlitl_s, &_tdist_s);
           if (res == UNZ_UNFINISHED) return UNZ_UNFINISHED;
           if (res < UNZ_OK)          goto   err;
         }
@@ -590,16 +590,16 @@ state_fixed:
           switch (stream->ss.state) {
             case INFL_STATE_DYNAMIC_HEADER:
               /* jump to resume if we've already read the header */
-              if (stream->ss.dyn.hlit > 0) { goto state_dyn_header_resume; }
+              if (stream->ss.dyn.hlit > 0) { goto dyn_hdr_resume; }
               /* otherwise fall through to read header */
               break;
             case INFL_STATE_DYNAMIC_CODELEN:
               /* rebuild tcodelen table from saved codelens */
               if (!huff_init_fast_lsb(tcodelen,stream->ss.dyn.codelens,NULL,MAX_CODELEN_CODES))
                 goto err;
-              goto state_dyn_codelen;
+              goto dyn_codelen;
             case INFL_STATE_DYNAMIC_BLOCK:
-              goto state_dyn_block;
+              goto dyn_blk;
             default:
               break;
           }
@@ -618,18 +618,18 @@ state_fixed:
         if (n > MAX_LITLEN_CODES + MAX_DIST_CODES) goto err;
 
         /* save state */
-        stream->ss.dyn.hlit  = hlit;
-        stream->ss.dyn.hdist = hdist;
-        stream->ss.dyn.hclen = hclen;
-        stream->ss.dyn.n     = n;
-        stream->ss.dyn.i     = 0;
-        stream->ss.dyn.codelen_complete = 0;
+        stream->ss.dyn.hlit         = hlit;
+        stream->ss.dyn.hdist        = hdist;
+        stream->ss.dyn.hclen        = hclen;
+        stream->ss.dyn.n            = n;
+        stream->ss.dyn.i            = 0;
+        stream->ss.dyn.codelen_done = 0;
 
-        /* Clear arrays */
+        /* clear arrays */
         memset(stream->ss.dyn.codelens,0,sizeof(stream->ss.dyn.codelens));
         memset(stream->ss.dyn.lens,    0,sizeof(stream->ss.dyn.lens));
 
-      state_dyn_header_resume:
+      dyn_hdr_resume:
         for (i = stream->ss.dyn.i; i < hclen; i++) {
           REFILL_STREAM_REQ(3);
           stream->ss.dyn.codelens[ord[i]] = bs.bits & 0x7;
@@ -640,12 +640,12 @@ state_fixed:
         if (!huff_init_fast_lsb(tcodelen,stream->ss.dyn.codelens,NULL,MAX_CODELEN_CODES))
           goto err;
 
-        stream->ss.dyn.codelen_complete = 1;
-        stream->ss.dyn.i                = 0;  /* reset i for next phase */
+        stream->ss.dyn.codelen_done = 1;
+        stream->ss.dyn.i            = 0;  /* reset i for next phase */
 
-      state_dyn_codelen:
+      dyn_codelen:
         stream->ss.state = INFL_STATE_DYNAMIC_CODELEN;
-        i                    = stream->ss.dyn.i;
+        i                = stream->ss.dyn.i;
 
         while (i < n) {
           REFILL_STREAM_REQ(21);
@@ -711,22 +711,20 @@ state_fixed:
         stream->ss.dyn.tlit_valid  = 1;
         stream->ss.dyn.tdist_valid = 1;
 
-      state_dyn_block:
+      dyn_blk:
         stream->ss.state = INFL_STATE_DYNAMIC_BLOCK;
         DONATE();
         {
-        int res = infl_strm_blk(stream,
-                                    &stream->ss.dyn.tlit,
-                                    &stream->ss.dyn.tdist);
-        if (res == UNZ_UNFINISHED) return UNZ_UNFINISHED;
-        if (res < UNZ_OK)          goto   err;
+          res = infl_strm_blk(stream,&stream->ss.dyn.tlit,&stream->ss.dyn.tdist);
+          if (res == UNZ_UNFINISHED) return UNZ_UNFINISHED;
+          if (res < UNZ_OK)          goto   err;
         }
         RESTORE();
 
         /* clear dynamic state for next block */
-        stream->ss.dyn.tlit_valid       = 0;
-        stream->ss.dyn.tdist_valid      = 0;
-        stream->ss.dyn.codelen_complete = 0;
+        stream->ss.dyn.tlit_valid   = 0;
+        stream->ss.dyn.tdist_valid  = 0;
+        stream->ss.dyn.codelen_done = 0;
       } break;
 
       default:
