@@ -26,6 +26,44 @@
 #include <unistd.h>
 #endif
 
+/* Error reporting and colorful output */
+#ifndef UNZ_TESTS_NO_COLORFUL_OUTPUT
+#define RESET       "\033[0m"
+#define RED         "\033[31m"
+#define GREEN       "\033[32m"
+#define YELLOW      "\033[33m"
+#define CYAN        "\033[36m"
+#define MAGENTA     "\033[35m"
+#define BOLDWHITE   "\033[1m\033[37m"
+#define BOLDRED     "\033[1m\033[31m"
+#define BOLDGREEN   "\033[1m\033[32m"
+#define BOLDCYAN    "\033[1m\033[36m"
+#define BOLDMAGENTA "\033[1m\033[35m"
+#else
+#define RESET
+#define RED
+#define GREEN
+#define YELLOW
+#define CYAN
+#define MAGENTA
+#define BOLDWHITE
+#define BOLDRED
+#define BOLDGREEN
+#define BOLDCYAN
+#define BOLDMAGENTA
+#endif
+
+/* Platform-specific symbols */
+#if defined(_WIN32) || defined(__MINGW32__) || defined(__MINGW64__) 
+# define OK_TEXT    "ok:"
+# define FAIL_TEXT  "fail:"
+# define FINAL_TEXT "^_^"
+#else
+# define OK_TEXT    "✔︎"
+# define FAIL_TEXT  "✗"
+# define FINAL_TEXT "🎉"
+#endif
+
 typedef struct {
     int total;
     int passed;
@@ -54,11 +92,18 @@ static const char* get_arch_info(void) {
 #endif
 }
 
-/* Get current time in seconds */
+/* Get current time in seconds with better precision */
 static double get_time(void) {
+#ifdef _WIN32
+    LARGE_INTEGER frequency, counter;
+    QueryPerformanceFrequency(&frequency);
+    QueryPerformanceCounter(&counter);
+    return (double)counter.QuadPart / frequency.QuadPart;
+#else
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
     return ts.tv_sec + ts.tv_nsec / 1000000000.0;
+#endif
 }
 
 /* Read entire file into memory */
@@ -88,10 +133,25 @@ static uint8_t* read_file(const char *path, size_t *size) {
     return data;
 }
 
-/* Print test result in cglm style */
-static void print_test_result(const char* name, bool passed, double elapsed_time) {
-    const char* check = passed ? "✔︎" : "✗";
-    printf("  %s %-40s %g\n", check, name, elapsed_time);
+/* Print test result in cglm style with better formatting */
+static void print_test_result(const char* name, bool passed, double elapsed_time, const char* error_msg) {
+    if (!passed) {
+        fprintf(stderr, BOLDRED "  " FAIL_TEXT BOLDWHITE " %s " RESET, name);
+        if (error_msg) {
+            fprintf(stderr, YELLOW "- %s" RESET, error_msg);
+        }
+        fprintf(stderr, "\n");
+    } else {
+        fprintf(stderr, GREEN "  " OK_TEXT RESET " %-40s ", name);
+        
+        if (elapsed_time > 0.01) {
+            fprintf(stderr, YELLOW "%.2fs", elapsed_time);
+        } else {
+            fprintf(stderr, "0");
+        }
+        
+        fprintf(stderr, "\n" RESET);
+    }
 }
 
 /* Test single file decompression */
@@ -99,6 +159,7 @@ static void test_file(const char *filename) {
     double start_time = get_time();
     char raw_path[512];
     char compressed_path[512];
+    char error_msg[256] = {0};
     
     snprintf(raw_path, sizeof(raw_path), "data/raw/%s", filename);
     snprintf(compressed_path, sizeof(compressed_path), "data/compressed/%s", filename);
@@ -121,11 +182,12 @@ static void test_file(const char *filename) {
     /* Decompress using your library */
     uint8_t *output = malloc(orig_size + 1000); /* Extra space for safety */
     if (!output) {
+        snprintf(error_msg, sizeof(error_msg), "allocation failed");
         free(orig_data);
         free(comp_data);
         g_results.failed++;
         g_results.total++;
-        print_test_result(filename, false, get_time() - start_time);
+        print_test_result(filename, false, get_time() - start_time, error_msg);
         return;
     }
     
@@ -134,12 +196,13 @@ static void test_file(const char *filename) {
     /* Initialize DEFLATE stream */
     infl_stream_t *stream = infl_init(output, (uint32_t)orig_size + 1000, 0);
     if (!stream) {
+        snprintf(error_msg, sizeof(error_msg), "stream init failed");
         free(orig_data);
         free(comp_data);
         free(output);
         g_results.failed++;
         g_results.total++;
-        print_test_result(filename, false, get_time() - start_time);
+        print_test_result(filename, false, get_time() - start_time, error_msg);
         return;
     }
     
@@ -154,15 +217,20 @@ static void test_file(const char *filename) {
     g_results.total_compressed_bytes += comp_size;
     
     bool passed = (ret == UNZ_OK && memcmp(orig_data, output, orig_size) == 0);
-    if (passed) {
-        g_results.passed++;
-    } else {
+    if (!passed) {
+        if (ret != UNZ_OK) {
+            snprintf(error_msg, sizeof(error_msg), "decompression error %d", ret);
+        } else {
+            snprintf(error_msg, sizeof(error_msg), "data mismatch");
+        }
         g_results.failed++;
+    } else {
+        g_results.passed++;
     }
     
     double elapsed = get_time() - start_time;
     g_results.total_time += elapsed;
-    print_test_result(filename, passed, elapsed);
+    print_test_result(filename, passed, elapsed, passed ? NULL : error_msg);
     
     infl_destroy(stream);
     free(orig_data);
@@ -174,6 +242,7 @@ static void test_file(const char *filename) {
 static void test_file_chunked(const char *filename) {
     double start_time = get_time();
     char test_name[256];
+    char error_msg[256] = {0};
     snprintf(test_name, sizeof(test_name), "%s_chunked", filename);
     
     char raw_path[512];
@@ -202,12 +271,13 @@ static void test_file_chunked(const char *filename) {
     
     infl_stream_t *stream = infl_init(output, (uint32_t)orig_size + 1000, 0);
     if (!stream) {
+        snprintf(error_msg, sizeof(error_msg), "stream init failed");
         free(orig_data);
         free(comp_data);
         free(output);
         g_results.failed++;
         g_results.total++;
-        print_test_result(test_name, false, get_time() - start_time);
+        print_test_result(test_name, false, get_time() - start_time, error_msg);
         return;
     }
     
@@ -227,15 +297,20 @@ static void test_file_chunked(const char *filename) {
     
     g_results.total++;
     bool passed = (ret == UNZ_OK && memcmp(orig_data, output, orig_size) == 0);
-    if (passed) {
-        g_results.passed++;
-    } else {
+    if (!passed) {
+        if (ret != UNZ_OK) {
+            snprintf(error_msg, sizeof(error_msg), "chunked decompression error %d", ret);
+        } else {
+            snprintf(error_msg, sizeof(error_msg), "chunked data mismatch");
+        }
         g_results.failed++;
+    } else {
+        g_results.passed++;
     }
     
     double elapsed = get_time() - start_time;
     g_results.total_time += elapsed;
-    print_test_result(test_name, passed, elapsed);
+    print_test_result(test_name, passed, elapsed, passed ? NULL : error_msg);
     
     infl_destroy(stream);
     free(orig_data);
@@ -341,6 +416,7 @@ static int compare_strings(const void *a, const void *b) {
 /* Test error conditions with invalid files */
 static void test_error_conditions(void) {
     double start_time = get_time();
+    char error_msg[256] = {0};
     
     /* Test invalid block type */
     const uint8_t invalid_block[] = {0x07}; /* BTYPE=11 (invalid) */
@@ -348,6 +424,10 @@ static void test_error_conditions(void) {
     
     int ret = infl_buf(invalid_block, sizeof(invalid_block), output, sizeof(output), 0);
     bool passed = (ret != UNZ_OK);
+    if (!passed) {
+        snprintf(error_msg, sizeof(error_msg), "should have rejected invalid block type");
+    }
+    
     if (passed) {
         g_results.passed++;
     } else {
@@ -357,7 +437,7 @@ static void test_error_conditions(void) {
     
     double elapsed = get_time() - start_time;
     g_results.total_time += elapsed;
-    print_test_result("invalid_block_type", passed, elapsed);
+    print_test_result("invalid_block_type", passed, elapsed, passed ? NULL : error_msg);
     
     /* Test buffer overflow - adjust expected behavior */
     start_time = get_time();
@@ -369,6 +449,10 @@ static void test_error_conditions(void) {
     
     ret = infl_buf(large_data_full, sizeof(large_data_full), small_output, sizeof(small_output), 0);
     passed = (ret != UNZ_OK);
+    if (!passed) {
+        snprintf(error_msg, sizeof(error_msg), "should have detected buffer overflow");
+    }
+    
     if (passed) {
         g_results.passed++;
     } else {
@@ -378,7 +462,7 @@ static void test_error_conditions(void) {
     
     elapsed = get_time() - start_time;
     g_results.total_time += elapsed;
-    print_test_result("buffer_overflow_protection", passed, elapsed);
+    print_test_result("buffer_overflow_protection", passed, elapsed, passed ? NULL : error_msg);
     
     /* Test truncated stream */
     start_time = get_time();
@@ -386,6 +470,10 @@ static void test_error_conditions(void) {
     
     ret = infl_buf(truncated, sizeof(truncated), output, sizeof(output), INFL_ZLIB);
     passed = (ret != UNZ_OK);
+    if (!passed) {
+        snprintf(error_msg, sizeof(error_msg), "should have detected truncated stream");
+    }
+    
     if (passed) {
         g_results.passed++;
     } else {
@@ -395,12 +483,13 @@ static void test_error_conditions(void) {
     
     elapsed = get_time() - start_time;
     g_results.total_time += elapsed;
-    print_test_result("truncated_stream", passed, elapsed);
+    print_test_result("truncated_stream", passed, elapsed, passed ? NULL : error_msg);
 }
 
 /* Test specific patterns that caused issues */
 static void test_regression_cases(void) {
     double start_time = get_time();
+    char error_msg[256] = {0};
     
     /* Test case that previously failed */
     const uint8_t regression1[] = {
@@ -410,6 +499,14 @@ static void test_regression_cases(void) {
     
     int ret = infl_buf(regression1, sizeof(regression1), output, sizeof(output), 0);
     bool passed = (ret == UNZ_OK && output[0] == 'A');
+    if (!passed) {
+        if (ret != UNZ_OK) {
+            snprintf(error_msg, sizeof(error_msg), "regression decompression error %d", ret);
+        } else {
+            snprintf(error_msg, sizeof(error_msg), "expected 'A', got 0x%02X", output[0]);
+        }
+    }
+    
     if (passed) {
         g_results.passed++;
     } else {
@@ -419,12 +516,13 @@ static void test_regression_cases(void) {
     
     double elapsed = get_time() - start_time;
     g_results.total_time += elapsed;
-    print_test_result("regression_case_1", passed, elapsed);
+    print_test_result("regression_case_1", passed, elapsed, passed ? NULL : error_msg);
 }
 
 static void test_file_streaming(const char *filename) {
     double start_time = get_time();
     char test_name[256];
+    char error_msg[256] = {0};
     snprintf(test_name, sizeof(test_name), "%s_streaming", filename);
     
     char raw_path[512];
@@ -449,11 +547,12 @@ static void test_file_streaming(const char *filename) {
 
     uint8_t *output = malloc(orig_size + 1000);
     if (!output) {
+        snprintf(error_msg, sizeof(error_msg), "allocation failed");
         free(orig_data);
         free(comp_data);
         g_results.failed++;
         g_results.total++;
-        print_test_result(test_name, false, get_time() - start_time);
+        print_test_result(test_name, false, get_time() - start_time, error_msg);
         return;
     }
 
@@ -461,12 +560,13 @@ static void test_file_streaming(const char *filename) {
 
     infl_stream_t *stream = infl_init(output, (uint32_t)orig_size + 1000, 0);
     if (!stream) {
+        snprintf(error_msg, sizeof(error_msg), "stream init failed");
         free(orig_data);
         free(comp_data);
         free(output);
         g_results.failed++;
         g_results.total++;
-        print_test_result(test_name, false, get_time() - start_time);
+        print_test_result(test_name, false, get_time() - start_time, error_msg);
         return;
     }
 
@@ -504,15 +604,20 @@ static void test_file_streaming(const char *filename) {
 
     g_results.total++;
     bool passed = (result == UNZ_OK && memcmp(orig_data, output, orig_size) == 0);
-    if (passed) {
-        g_results.passed++;
-    } else {
+    if (!passed) {
+        if (result != UNZ_OK) {
+            snprintf(error_msg, sizeof(error_msg), "streaming decompression error %d", result);
+        } else {
+            snprintf(error_msg, sizeof(error_msg), "streaming data mismatch");
+        }
         g_results.failed++;
+    } else {
+        g_results.passed++;
     }
 
     double elapsed = get_time() - start_time;
     g_results.total_time += elapsed;
-    print_test_result(test_name, passed, elapsed);
+    print_test_result(test_name, passed, elapsed, passed ? NULL : error_msg);
 
     infl_destroy(stream);
     free(orig_data);
@@ -522,6 +627,7 @@ static void test_file_streaming(const char *filename) {
 
 static void test_streaming_edge_cases(void) {
     double start_time = get_time();
+    char error_msg[256] = {0};
     
     /* Test 1: Uncompressed block with reasonable chunks */
     const uint8_t uncompressed[] = {
@@ -537,18 +643,17 @@ static void test_streaming_edge_cases(void) {
     
     bool passed = ((result == UNZ_OK || result == UNZ_UNFINISHED) 
                    && memcmp(output, "Hello", 5) == 0);
-    if (passed) {
-        g_results.passed++;
-    } else {
+    if (!passed) {
+        snprintf(error_msg, sizeof(error_msg), "small data streaming failed, result=%d", result);
         g_results.failed++;
+    } else {
+        g_results.passed++;
     }
     g_results.total++;
     
     double elapsed = get_time() - start_time;
     g_results.total_time += elapsed;
-    print_test_result("small_data_streaming", passed, elapsed);
-    
-    infl_destroy(stream);
+    print_test_result("small_data_streaming", passed, elapsed, passed ? NULL : error_msg);
     
     /* Test 2: ZLIB header streaming */
     start_time = get_time();
@@ -582,12 +687,11 @@ static void test_streaming_edge_cases(void) {
         }
         
         passed = (result == UNZ_OK);
-        if (passed) {
-            g_results.passed++;
-        } else {
-            g_results.failed++;
+        if (!passed) {
+            snprintf(error_msg, sizeof(error_msg), "zlib streaming failed, result=%d", result);
         }
         
+        /* Cleanup */
         infl_destroy(stream);
         free(zlib_data);
     } else {
@@ -601,10 +705,8 @@ static void test_streaming_edge_cases(void) {
         result = infl_stream(stream, simple_deflate, sizeof(simple_deflate));
         
         passed = (result == UNZ_OK && memcmp(output, "ABC", 3) == 0);
-        if (passed) {
-            g_results.passed++;
-        } else {
-            g_results.failed++;
+        if (!passed) {
+            snprintf(error_msg, sizeof(error_msg), "fallback streaming failed, result=%d", result);
         }
         
         infl_destroy(stream);
@@ -613,7 +715,7 @@ static void test_streaming_edge_cases(void) {
     
     elapsed = get_time() - start_time;
     g_results.total_time += elapsed;
-    print_test_result("zlib_header_streaming", passed, elapsed);
+    print_test_result("zlib_header_streaming", passed, elapsed, passed ? NULL : error_msg);
     
     /* Test 3: Chunked streaming with realistic sizes */
     start_time = get_time();
@@ -645,18 +747,17 @@ static void test_streaming_edge_cases(void) {
     }
     
     passed = (result == UNZ_OK || result == UNZ_UNFINISHED);
-    if (passed) {
-        g_results.passed++;
-    } else {
+    if (!passed) {
+        snprintf(error_msg, sizeof(error_msg), "chunked streaming failed, result=%d", result);
         g_results.failed++;
+    } else {
+        g_results.passed++;
     }
     g_results.total++;
     
     elapsed = get_time() - start_time;
     g_results.total_time += elapsed;
-    print_test_result("chunked_streaming_64byte", passed, elapsed);
-    
-    infl_destroy(stream);
+    print_test_result("chunked_streaming_64byte", passed, elapsed, passed ? NULL : error_msg);
 }
 
 /* Replace the debug streaming tests with a note about minimum chunk size */
@@ -672,8 +773,9 @@ int main(int argc, char *argv[]) {
     (void)argc; /* Suppress unused parameter warning */
     (void)argv;
     
-    printf("Welcome to unz/defl tests ( arch: %s )\n\n", get_arch_info());
-    printf("  Test Name                            Elapsed Time\n");
+    fprintf(stderr, CYAN "\nWelcome to unz/defl tests ( arch: %s )\n\n" RESET, get_arch_info());
+    
+    fprintf(stderr, BOLDWHITE "  %-40s    %-40s\n" RESET, "Test Name", "Elapsed Time");
     
     /* Check if directories exist */
     struct stat st;
@@ -759,12 +861,20 @@ int main(int argc, char *argv[]) {
     test_streaming_edge_cases();
 
     /* Print summary */
-    printf("\n  All tests %s 🎉\n\n", g_results.failed == 0 ? "passed" : "failed");
+    if (g_results.failed == 0) {
+        fprintf(stderr, BOLDGREEN "\n  All tests passed " FINAL_TEXT "\n" RESET);
+    }
     
-    printf("unz/defl test results (%.2fs):\n", g_results.total_time);
-    printf("--------------------------\n");
-    printf("%d tests ran, %d passed, %d failed\n\n", 
-           g_results.total, g_results.passed, g_results.failed);
+    fprintf(stderr,
+            CYAN "\nunz/defl test results (%.2fs):\n" RESET
+            "--------------------------\n"
+            MAGENTA "%d" RESET " tests ran, "
+            GREEN   "%d" RESET " passed, "
+            RED     "%d" RESET " failed\n\n" RESET,
+            g_results.total_time,
+            g_results.total,
+            g_results.passed,
+            g_results.failed);
     
     if (g_results.failed == 0) {
         printf("PASS: test/test_files\n");
