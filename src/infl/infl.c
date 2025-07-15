@@ -438,6 +438,9 @@ infl(defl_stream_t * __restrict stream) {
     return UNZ_NOOP;
   }
 
+  if (!stream->bs.p || stream->bs.p == stream->bs.end)
+    return UNZ_OK;
+
   /* initilize static tables */
   if (!_init) {
     if (!huff_init_lsb_extof(&_tlitl,fxd,NULL,lvals,257,288) ||
