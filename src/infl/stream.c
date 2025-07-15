@@ -451,7 +451,7 @@ infl_stream(infl_stream_t * __restrict stream,
     if (stream->bs.end == stream->end->end - srclen) {
       stream->bs.end = stream->end->end;
     }
-  } else if (!stream->start) {
+  } else if (!stream->start || !stream->start->p) {
     /* empty data */
     return UNZ_OK;
   }

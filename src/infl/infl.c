@@ -434,11 +434,10 @@ infl(defl_stream_t * __restrict stream) {
   unz__bitstate_t bs;
   uint_fast8_t    btype, bfinal = 0;
 
-  if (!stream->bs.chunk && !(stream->bs.chunk = stream->start)) {
+  if (!stream->bs.chunk && !(stream->bs.chunk = stream->start))
     return UNZ_NOOP;
-  }
 
-  if (!stream->bs.p || stream->bs.p == stream->bs.end)
+  if (!stream->start->p || stream->start->p == stream->start->end)
     return UNZ_OK;
 
   /* initilize static tables */
