@@ -87,7 +87,7 @@ typedef struct unz__bitstate_t {
 typedef enum {
   INFL_STATE_NONE = 0,
   INFL_STATE_HEADER,
-  INFL_STATE_BLOCK_HEADER, 
+  INFL_STATE_BLOCK_HEADER,
   INFL_STATE_RAW,
   INFL_STATE_FIXED,
   INFL_STATE_DYNAMIC_HEADER,
@@ -95,67 +95,94 @@ typedef enum {
   INFL_STATE_DYNAMIC_LITLEN,
   INFL_STATE_DYNAMIC_BLOCK,
   INFL_STATE_DONE
-} infl_state_t;
+} infl_stream_state_t;
+
+typedef enum {
+  BLOCK_STATE_NONE = 0,
+  BLOCK_STATE_LITERAL,
+  BLOCK_STATE_LENGTH,
+//  BLOCK_STATE_DISTANCE,
+  BLOCK_STATE_BACKREF
+} block_decode_state_t;
+
+typedef struct {
+  uint16_t len;
+  uint16_t remlen;
+  uint8_t  resuming;
+} raw_block_state_t;
+
+typedef struct {
+  block_decode_state_t state;
+  unsigned len;
+  unsigned dist;
+  unsigned src;
+  unsigned copy_remaining;
+} block_state_t;
+
+typedef struct {
+  int              hlit;
+  int              hdist;
+  int              hclen;
+  int              n;
+  int              i;
+  int              repeat;
+  int              prev;
+  uint8_t          codelens[MAX_CODELEN_CODES];
+  uint8_t          lens[MAX_LITLEN_CODES + MAX_DIST_CODES];
+  huff_table_ext_t tlit;
+  huff_table_ext_t tdist;
+  uint8_t          tlit_valid;
+  uint8_t          tdist_valid;
+  uint8_t          codelen_done;
+} dynamic_block_state_t;
+
+typedef struct unz__streaming_state_t {
+  infl_stream_state_t   state;
+  uint8_t               bfinal;
+  uint8_t               btype;
+  raw_block_state_t     raw;
+  block_state_t         blk;
+  dynamic_block_state_t dyn;
+} unz__streaming_state_t;
 
 struct unz__stream_t {
-  unz_chunk_t   *start;
-  unz_chunk_t   *end;
-  unz_chunk_t   *it;
+  unz_chunk_t           *start;
+  unz_chunk_t           *end;
+  unz_chunk_t           *it;
 
-  void          *header;
+  void                  *header;
 
-  void          *(*malloc)(size_t);
-  void          *(*realloc)(void *, size_t);
-  void           (*free)(void *);
+  void                  *(*malloc)(size_t);
+  void                  *(*realloc)(void *, size_t);
+  void                   (*free)(void *);
 
-  size_t         bitpos; /* bit position in all */
-  uint8_t       *dst;
-  uint32_t       dstlen;
-  size_t         dstpos;
-  size_t         srclen; /* sum_of(chunk->len)  */
-  int            flags;
+  size_t                 bitpos; /* bit position in all */
+  uint8_t               *dst;
+  uint32_t               dstlen;
+  size_t                 dstpos;
+  size_t                 srclen; /* sum_of(chunk->len)  */
+  int                    flags;
 
-  unz__bitstate_t bs;
-  
-  /* streaming state start */
-  infl_state_t   stream_state;
-  uint_fast8_t   stream_btype;
-  uint_fast8_t   stream_bfinal;
-  
-  /* raw block state for resume */
-  struct {
-    uint16_t len;
-    uint16_t remlen;
-    uint8_t  resuming;
-  } raw_state;
-  
-  /* dynamic huffman state */
-  struct {
-    int               hlit, hdist, hclen;
-    int               i, n, repeat, prev;
-    uint_fast8_t      lens[MAX_LITLEN_CODES + MAX_DIST_CODES];
-    huff_table_ext_t  tlit, tdist;
-    uint8_t           tlit_valid, tdist_valid;
-  } dyn_state;
-  /* streaming state end */
-  
+  unz__bitstate_t        bs;
+  unz__streaming_state_t ss;
+
   /* chunk pool management */
-  unz_chunk_t    *chunk_pool[UNZ_CHUNK_POOL_SIZE];
-  uint8_t        *chunk_buffers[UNZ_CHUNK_POOL_SIZE];
-  int             pool_used;
-  unz_chunk_t    *current_appendable; /* current chunk for appending small data */
-  
+  unz_chunk_t           *chunk_pool[UNZ_CHUNK_POOL_SIZE];
+  uint8_t               *chunk_buffers[UNZ_CHUNK_POOL_SIZE];
+  int                    pool_used;
+  unz_chunk_t           *current_appendable; /* current chunk for appending small data */
+
   /* chunk structure pool - for non-appendable chunks */
-  unz_chunk_t    *chunk_struct_pool[UNZ_CHUNK_STRUCT_POOL_SIZE];
-  int             struct_pool_used;
-  int             struct_pool_available;
-  
+  unz_chunk_t           *chunk_struct_pool[UNZ_CHUNK_STRUCT_POOL_SIZE];
+  int                    struct_pool_used;
+  int                    struct_pool_available;
+
   /* statistics for tuning (optional - can be ifdef'd out in release) */
 #ifdef UNZ_STATS
-  size_t          total_appends;
-  size_t          total_directs;
-  size_t          pool_hits;
-  size_t          pool_misses;
+  size_t                 total_appends;
+  size_t                 total_directs;
+  size_t                 pool_hits;
+  size_t                 pool_misses;
 #endif
 };
 
