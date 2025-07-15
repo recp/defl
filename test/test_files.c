@@ -748,6 +748,11 @@ static void test_streaming_edge_cases(void) {
         infl_destroy(stream);
     }
     
+    if (passed) {
+        g_results.passed++;
+    } else {
+        g_results.failed++;
+    }
     g_results.total++;
     
     elapsed = get_time() - start_time;
