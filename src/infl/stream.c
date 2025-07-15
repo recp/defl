@@ -17,7 +17,10 @@
 #include "../common.h"
 #include "apicommon.h"
 
-#define REFILL_STREAM(req)                                                    \
+#define UNFINISHED()                         DONATE();return UNZ_UNFINISHED;
+#define UNFINISHED_BLK() stream->dstpos=dpos;DONATE();return UNZ_UNFINISHED;
+
+#define REFILL_STREAM_X(req,XXX,REQQ)                                         \
   if (unlikely(bs.nbits < (req))) {                                           \
     int take;                                                                 \
     do {                                                                      \
@@ -38,17 +41,17 @@
             bs.chunk = bs.chunk->next;                                        \
             bs.p     = bs.chunk->p;                                           \
             bs.end   = bs.chunk->end;                                         \
-            if (!bs.p || !bs.end) {                                           \
-              if(bs.nbits) {break;} else {DONATE();return UNZ_UNFINISHED;}    \
-            }                                                                 \
-          } else {                                                            \
-            if(bs.nbits) {break;}   else {DONATE();return UNZ_UNFINISHED;}    \
-          }                                                                   \
+            if (!bs.p || !bs.end) { if(bs.nbits REQQ){break;}else{XXX;} }     \
+          } else { if(bs.nbits REQQ){break;}else{XXX;} }                      \
         }                                                                     \
         bs.npbits=huff_read(&bs.p,&bs.pbits,bs.end);                          \
       }                                                                       \
     } while (unlikely(bs.nbits < (req) && bs.npbits));                        \
   }
+
+#define REFILL_STREAM_BLK(req)      REFILL_STREAM_X(req, UNFINISHED_BLK(),)
+#define REFILL_STREAM(req)          REFILL_STREAM_X(req, UNFINISHED(),)
+#define REFILL_STREAM_REQ(req)      REFILL_STREAM_X(req, UNFINISHED(),<req)
 
 static UNZ_HOT
 UnzResult
