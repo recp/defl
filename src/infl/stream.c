@@ -243,11 +243,13 @@ infl_block_stream(defl_stream_t          * __restrict stream,
                   const huff_table_ext_t * __restrict tdist) {
   uint8_t * __restrict dst;
   size_t  * __restrict dst_pos;
-  unz__bitstate_t bs;
-  size_t          dst_cap, dpos, src;
-  unsigned        len,  dist;
-  uint_fast16_t   lsym;
-  uint8_t         used;
+  unz__bitstate_t      bs;
+  size_t               dst_cap, dpos, src;
+  unsigned             len,  dist;
+  uint_fast16_t        lsym;
+  uint8_t              used;
+  block_decode_state_t state;
+  unsigned             saved_len, saved_dist, saved_src, copy_remaining;
 
   dst     = stream->dst;
   dst_cap = stream->dstlen;
@@ -255,21 +257,51 @@ infl_block_stream(defl_stream_t          * __restrict stream,
   dpos    = *dst_pos;
 
   RESTORE();
+  
+  /* restore block state if resuming */
+  state          = stream->block_state.state;
+  saved_len      = stream->block_state.len;
+  saved_dist     = stream->block_state.dist;
+  saved_src      = stream->block_state.src;
+  copy_remaining = stream->block_state.copy_remaining;
+
+  switch (state) {
+    case BLOCK_STATE_NONE:
+    case BLOCK_STATE_LITERAL:
+      break;
+    case BLOCK_STATE_LENGTH:
+      len = saved_len;
+      goto state_distance;
+    case BLOCK_STATE_BACKREF:
+      len  = copy_remaining;
+      dist = saved_dist;
+      src  = saved_src;
+      goto state_backref;
+  }
 
   while (true) {
-    /* decode literal/length symbol - need up to 21 bits */
-    REFILL_STREAM(21);
-    
+    REFILL_STREAM_BLK(21);
+
     lsym = huff_decode_lsb_extof(tlit, bs.bits, &used, &len, 257);
-    if (!used || lsym > 285)
+    if (!used || used > bs.nbits) {
+      UNFINISHED_BLK();
+    }
+
+    if (lsym > 285) {
+      *dst_pos = dpos;
+      DONATE();
       return UNZ_ERR; /* invalid symbol */
+    }
 
     CONSUME(used);
 
     if (lsym < 256) {
       /* literal byte */
-      if (unlikely(dpos >= dst_cap))
+      if (unlikely(dpos >= dst_cap)) {
+        *dst_pos = dpos;
+        DONATE();
         return UNZ_EFULL;
+      }
       dst[dpos++] = (uint8_t)lsym;
       continue;
     } else if (unlikely(lsym == 256)) {
@@ -277,18 +309,37 @@ infl_block_stream(defl_stream_t          * __restrict stream,
       break;
     }
 
-    /* Distance code - need up to 29 bits */
-    REFILL_STREAM(29);
-    
-    dist = huff_decode_lsb_ext(tdist, bs.bits, &used);
+    stream->block_state.state = BLOCK_STATE_LENGTH;
+    stream->block_state.len   = len;
 
-    /* validate distance */
-    if (unlikely(!used || dist > dpos))
-      return UNZ_ERR;
+state_distance:
+    REFILL_STREAM_BLK(29);
+
+    dist = huff_decode_lsb_ext(tdist, bs.bits, &used);
+    if (!used || used > bs.nbits) {
+      UNFINISHED_BLK();
+    }
+
+    if (unlikely(dist > dpos)) {
+      *dst_pos = dpos;
+      DONATE();
+      return UNZ_ERR; /* validate distance */
+    }
+
     CONSUME(used);
 
-    if (unlikely((dpos + len) > dst_cap))
+    if (unlikely((dpos + len) > dst_cap)) {
+      *dst_pos = dpos;
+      DONATE();
       return UNZ_EFULL;
+    }
+
+state_backref:
+    stream->block_state.state          = BLOCK_STATE_BACKREF;
+    stream->block_state.len            = len;
+    stream->block_state.dist           = dist;
+    stream->block_state.src            = (unsigned)(dpos - dist);
+    stream->block_state.copy_remaining = len;
 
     /* output back-reference */
     if (dist == 1) {
@@ -356,8 +407,13 @@ infl_block_stream(defl_stream_t          * __restrict stream,
 
   *dst_pos = dpos;
 
-  DONATE();
+  stream->block_state.state          = BLOCK_STATE_NONE;
+  stream->block_state.len            = 0;
+  stream->block_state.dist           = 0;
+  stream->block_state.src            = 0;
+  stream->block_state.copy_remaining = 0;
 
+  DONATE();
   return UNZ_OK;
 }
 
