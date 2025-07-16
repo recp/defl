@@ -28,7 +28,7 @@ getbyt(defl_chunk_t ** __restrict chunkref,
   ch = *chunkref;
 
   /* empty chnuk is not allowed */
-  if (ch->p == ch->end) {
+  if (ch->p == ch->end && ch->next) {
     ch        = ch->next;
     *chunkref = ch;
   }

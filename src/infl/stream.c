@@ -71,7 +71,7 @@ infl_strm_raw(defl_stream_t * __restrict stream) {
     len    = stream->ss.raw.len;
     remlen = stream->ss.raw.remlen;
     dpos   = (unsigned)stream->dstpos;
-    dlen   = stream->dstlen;
+    /* dlen   = stream->dstlen; */
     dst    = stream->dst + dpos;
     RESTORE();
     goto resume_copy;
@@ -518,6 +518,12 @@ hdr:
 
     stream->ss.state = INFL_STATE_HEADER;
 
+    /* ensure we have a chunk before proceeding */
+    if (!stream->bs.chunk || !stream->bs.chunk->p) {
+      DONATE();
+      return UNZ_UNFINISHED;
+    }
+
     /* count available bytes */
     avail = 0;
     tmp   = stream->bs.chunk;
@@ -583,26 +589,26 @@ fixed:
 
         /* check if we're resuming */
         if (stream->ss.state >= INFL_STATE_DYNAMIC_HEADER) {
-          /* Restore saved state */
-          hlit   = stream->ss.dyn.hlit;
-          hdist  = stream->ss.dyn.hdist;
-          hclen  = stream->ss.dyn.hclen;
-          n      = stream->ss.dyn.n;
-          i      = stream->ss.dyn.i;
-          repeat = stream->ss.dyn.repeat;
-          prev   = stream->ss.dyn.prev;
-
           /* jump to appropriate resume point */
           switch (stream->ss.state) {
             case INFL_STATE_DYNAMIC_HEADER:
-              /* jump to resume if we've already read the header */
-              if (stream->ss.dyn.hlit > 0) { goto dyn_hdr_resume; }
-              /* otherwise fall through to read header */
+              if (stream->ss.dyn.hlit > 0) {
+                /* restore all state for header resume */
+                hlit   = stream->ss.dyn.hlit;
+                hdist  = stream->ss.dyn.hdist;
+                hclen  = stream->ss.dyn.hclen;
+                n      = stream->ss.dyn.n;
+                goto dyn_hdr_resume;
+              }
               break;
             case INFL_STATE_DYNAMIC_CODELEN:
-              /* rebuild tcodelen table from saved codelens */
+              hlit  = stream->ss.dyn.hlit;
+              hdist = stream->ss.dyn.hdist;
+
               if (!huff_init_fast_lsb(tcodelen,stream->ss.dyn.codelens,NULL,MAX_CODELEN_CODES))
                 goto err;
+              /* other variables will be restored at dyn_codelen */
+              n = stream->ss.dyn.n;
               goto dyn_codelen;
             case INFL_STATE_DYNAMIC_BLOCK:
               goto dyn_blk;
