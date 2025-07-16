@@ -611,34 +611,25 @@ fixed:
         huff_fast_entry_t fe;
         int               i, n, hclen, hlit, hdist, repeat, prev;
 
-        /* check if we're resuming */
-        if (stream->ss.state >= INFL_STATE_DYNAMIC_HEADER) {
-          /* jump to appropriate resume point */
-          switch (stream->ss.state) {
-            case INFL_STATE_DYNAMIC_HEADER:
-              if (stream->ss.dyn.hlit > 0) {
-                /* restore all state for header resume */
-                hlit   = stream->ss.dyn.hlit;
-                hdist  = stream->ss.dyn.hdist;
-                hclen  = stream->ss.dyn.hclen;
-                n      = stream->ss.dyn.n;
-                goto dyn_hdr_resume;
-              }
-              break;
-            case INFL_STATE_DYNAMIC_CODELEN:
-              hlit  = stream->ss.dyn.hlit;
-              hdist = stream->ss.dyn.hdist;
+        if (stream->ss.state == INFL_STATE_DYNAMIC_BLOCK) {
+          goto dyn_blk;
+        } else if (stream->ss.state == INFL_STATE_DYNAMIC_CODELEN) {
+          hlit  = stream->ss.dyn.hlit;
+          hdist = stream->ss.dyn.hdist;
+          n     = hlit + hdist;
 
-              if (!huff_init_fast_lsb(tcodelen,stream->ss.dyn.codelens,NULL,MAX_CODELEN_CODES))
-                goto err;
-              /* other variables will be restored at dyn_codelen */
-              n = stream->ss.dyn.n;
-              goto dyn_codelen;
-            case INFL_STATE_DYNAMIC_BLOCK:
-              goto dyn_blk;
-            default:
-              break;
-          }
+          if (!huff_init_fast_lsb(tcodelen,stream->ss.dyn.codelens,NULL,MAX_CODELEN_CODES))
+            goto err;
+
+          i = stream->ss.dyn.i;
+          goto dyn_codelen_resume;
+        } else if (stream->ss.state == INFL_STATE_DYNAMIC_HEADER && stream->ss.dyn.i > 0) {
+          hlit  = stream->ss.dyn.hlit;
+          hdist = stream->ss.dyn.hdist;
+          hclen = stream->ss.dyn.hclen;
+          n     = hlit + hdist;
+          i     = stream->ss.dyn.i;
+          goto dyn_hdr_resume;
         }
 
         /* fresh start - read header */
@@ -651,22 +642,25 @@ fixed:
         n     = hlit + hdist;
         CONSUME(14);
 
-        if (n > MAX_LITLEN_CODES + MAX_DIST_CODES) goto err;
+        if (hlit > 286 || hdist > 30 || n > MAX_LITLEN_CODES + MAX_DIST_CODES)
+          goto err;
 
-        /* save state */
-        stream->ss.dyn.hlit         = hlit;
-        stream->ss.dyn.hdist        = hdist;
-        stream->ss.dyn.hclen        = hclen;
-        stream->ss.dyn.n            = n;
-        stream->ss.dyn.i            = 0;
-        stream->ss.dyn.codelen_done = 0;
+        /* initialize state */
+        stream->ss.dyn.hlit   = hlit;
+        stream->ss.dyn.hdist  = hdist;
+        stream->ss.dyn.hclen  = hclen;
+        stream->ss.dyn.n      = n;
+        stream->ss.dyn.i      = 0;
+        stream->ss.dyn.repeat = 0;
+        stream->ss.dyn.prev   = 0;
 
         /* clear arrays */
         memset(stream->ss.dyn.codelens,0,sizeof(stream->ss.dyn.codelens));
         memset(stream->ss.dyn.lens,    0,sizeof(stream->ss.dyn.lens));
+        i = 0;
 
       dyn_hdr_resume:
-        for (i = stream->ss.dyn.i; i < hclen; i++) {
+        for (; i < hclen; i++) {
           REFILL_STREAM_REQ(3);
           stream->ss.dyn.codelens[ord[i]] = bs.bits & 0x7;
           CONSUME(3);
@@ -676,13 +670,13 @@ fixed:
         if (!huff_init_fast_lsb(tcodelen,stream->ss.dyn.codelens,NULL,MAX_CODELEN_CODES))
           goto err;
 
-        stream->ss.dyn.codelen_done = 1;
-        stream->ss.dyn.i            = 0;  /* reset i for next phase */
+        /* reset for next phase */
+        stream->ss.dyn.i = 0;
+        i                = 0;
 
-      dyn_codelen:
         stream->ss.state = INFL_STATE_DYNAMIC_CODELEN;
-        i                = stream->ss.dyn.i;
 
+      dyn_codelen_resume:
         while (i < n) {
           REFILL_STREAM_REQ(21);
 
@@ -691,76 +685,81 @@ fixed:
           CONSUME(fe.len);
 
           switch (fe.sym) {
-            default:
+            default:  /* 0-15: literal code length */
+              if (fe.sym > 15) goto err;
               stream->ss.dyn.lens[i++] = (uint_fast8_t)fe.sym;
-              stream->ss.dyn.i = i;
               break;
-
-            case 16: {
+            case 16: {  /* repeat previous */
               if (stream->ss.dyn.repeat > 0) {
-                /* resuming mid-repeat */
+                /* resuming a repeat operation */
                 repeat = stream->ss.dyn.repeat;
                 prev   = stream->ss.dyn.prev;
               } else {
-                /* new repeat sequence */
+                /* new repeat */
+                if (i == 0) goto err;  /* no previous code length */
                 repeat = 3 + (bs.bits & 0x3);
                 CONSUME(2);
-                if (i == 0 || i + repeat > n) goto err;
                 prev = stream->ss.dyn.lens[i - 1];
-                stream->ss.dyn.prev = prev;
+                if (i + repeat > n) goto err;
+                /* save state for potential resume */
+                stream->ss.dyn.repeat = repeat;
+                stream->ss.dyn.prev   = prev;
               }
 
-              /* process repeat, saving state in case we need to pause */
+              /* fill repeat values */
               while (repeat > 0 && i < n) {
                 stream->ss.dyn.lens[i++] = prev;
                 repeat--;
-                stream->ss.dyn.i = i;
-                stream->ss.dyn.repeat = repeat;
               }
 
-              if (repeat == 0) {
-                /* clear repeat state */
-                stream->ss.dyn.repeat = 0;
+              /* update or clear repeat state */
+              if (repeat > 0) {
+                stream->ss.dyn.repeat = repeat;  /* still have more to do */
+              } else {
+                stream->ss.dyn.repeat = 0;  /* done with this repeat */
+                stream->ss.dyn.prev   = 0;
               }
             } break;
-            case 17:
+
+            case 17:  /* repeat zero 3-10 times */
               repeat = 3 + (bs.bits & 0x7);
               CONSUME(3);
               if (i + repeat > n) goto err;
+              /* lens array already zero-initialized */
               i += repeat;
-              stream->ss.dyn.i = i;
               break;
-            case 18:
+
+            case 18:  /* repeat zero 11-138 times */
               repeat = 11 + (bs.bits & 0x7F);
               CONSUME(7);
               if (i + repeat > n) goto err;
+              /* lens array already zero-initialized */
               i += repeat;
-              stream->ss.dyn.i = i;
               break;
           }
+
+          /* Save progress */
+          stream->ss.dyn.i = i;
         }
+
         /* build literal/length and distance tables */
         if (!huff_init_lsb_extof(&stream->ss.dyn.tlit,stream->ss.dyn.lens,NULL,lvals,257,hlit) ||
             !huff_init_lsb_ext(&stream->ss.dyn.tdist, stream->ss.dyn.lens+hlit,NULL,dvals,hdist))
           goto err;
 
-        stream->ss.dyn.tlit_valid  = 1;
-        stream->ss.dyn.tdist_valid = 1;
-
       dyn_blk:
         stream->ss.state = INFL_STATE_DYNAMIC_BLOCK;
+
+        /* decode the compressed block */
         DONATE();
-        {
-          res = infl_strm_blk(stream,&stream->ss.dyn.tlit,&stream->ss.dyn.tdist);
-          if (res == UNZ_UNFINISHED) return UNZ_UNFINISHED;
-          if (res < UNZ_OK)          goto   err;
-        }
+        res = infl_strm_blk(stream, &stream->ss.dyn.tlit, &stream->ss.dyn.tdist);
         RESTORE();
 
-        /* clear dynamic state for next block */
-        stream->ss.dyn.tlit_valid   = 0;
-        stream->ss.dyn.tdist_valid  = 0;
-        stream->ss.dyn.codelen_done = 0;
+        if (res == UNZ_UNFINISHED) return UNZ_UNFINISHED;
+        if (res < UNZ_OK)          goto err;
+
+        /* success - reset ALL dynamic state for next block */
+        memset(&stream->ss.dyn, 0, sizeof(stream->ss.dyn));
       } break;
 
       default:
