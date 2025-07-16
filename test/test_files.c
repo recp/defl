@@ -249,7 +249,7 @@ test_file(const char *filename) {
   print_test_result(filename, passed, elapsed,
                     passed?NULL:err_msg, passed?details:NULL);
 
-  /* infl_destroy(stream); */
+  infl_destroy(stream);
   free(orig_data);
   free(compr_data);
   free(output);
@@ -323,7 +323,7 @@ test_file_chunked(const char *filename) {
   print_test_result(test_name, passed, elapsed,
                     passed ? NULL : err_msg, passed ? details : NULL);
 
-  /* infl_destroy(stream); */
+  infl_destroy(stream);
   free(orig_data);
   free(compr_data);
   free(output);
@@ -634,7 +634,7 @@ test_file_streaming(const char *filename) {
   print_test_result(test_name, passed, elapsed,
                     passed ? NULL : err_msg, passed ? details : NULL);
 
-  /* infl_destroy(stream); */
+  infl_destroy(stream);
   free(orig_data);
   free(comp_data);
   free(output);
@@ -684,7 +684,7 @@ test_streaming_edge_cases(void) {
   print_test_result("small_data_streaming", passed, elapsed,
                     passed ? NULL : err_msg, passed ? details : NULL);
 
-  /* infl_destroy(stream); */
+  infl_destroy(stream);
 
   /* test 2: ZLIB header streaming */
   start_time = get_time();
@@ -723,7 +723,7 @@ test_streaming_edge_cases(void) {
     }
 
     /* cleanup */
-    /* infl_destroy(stream); */
+    infl_destroy(stream);
     free(zlib_data);
   } else {
     /* fallback to simple test without ZLIB */
@@ -742,7 +742,7 @@ test_streaming_edge_cases(void) {
       snprintf(details, sizeof(details), "raw DEFLATE");
     }
 
-    /* infl_destroy(stream); */
+    infl_destroy(stream);
   }
 
   if (passed) { g_results.passed++; }
@@ -797,7 +797,7 @@ test_streaming_edge_cases(void) {
   print_test_result("chunked_streaming_64byte", passed, elapsed,
                     passed ? NULL : err_msg, passed ? details : NULL);
 
-  /* infl_destroy(stream); */
+  infl_destroy(stream);
 }
 
 int main(int argc, char *argv[]) {

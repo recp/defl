@@ -75,7 +75,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
         result = infl_stream(stream, NULL, 0);
       }
 
-      /* infl_destroy(stream); */
+      infl_destroy(stream);
     }
 
     /* test byte-by-byte streaming */
@@ -85,7 +85,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
         int result = infl_stream(stream, data + i, 1);
         if (result == UNZ_OK || result < UNZ_OK) break;
       }
-      /* infl_destroy(stream); */
+      infl_destroy(stream);
     }
   }
 

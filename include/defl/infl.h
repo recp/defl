@@ -111,12 +111,24 @@ infl_buf(const void * __restrict src,
   infl_include(st, src, srclen);
   ret = infl(st);
 
-  /* this is called in infl() now */
-  /* infl_destroy(st); */
+  infl_destroy(st);
 
   return ret;
 }
 
+/*!
+ * @brief inflate given deflated content stream, source will be inflated
+ *        as given data until end. infl_stream() will return UNZ_OK when
+ *        the inflation is complete. If more data is needed, it will return
+ *        UNZ_UNFINISHED
+ *
+ *  call infl_stream() whenever you have more data to decompress, and it will
+ *  continue inflating the stream without waiting all data to be available.
+ *
+ *  you must manually call infl_destroy() when you are done with the stream
+ *
+ * @param[in] stream  deflate stream
+ */
 UNZ_EXPORT
 int
 infl_stream(infl_stream_t * __restrict stream,

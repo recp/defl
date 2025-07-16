@@ -748,13 +748,10 @@ fixed:
 
 ok:
   DONATE();
-  infl_destroy(stream); /* TODO: stream cannot be re-used anymore, do we want this? */
   return UNZ_OK;
 noop:
-  infl_destroy(stream); /* TODO: stream cannot be re-used anymore, do we want this? */
   return UNZ_NOOP;
 err:
   stream->ss.state = INFL_STATE_NONE;  /* reset on error */
-  infl_destroy(stream); /* TODO: stream cannot be re-used anymore, do we want this? */
   return UNZ_ERR;
 }

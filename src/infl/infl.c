@@ -544,13 +544,10 @@ infl(defl_stream_t * __restrict stream) {
   /* stream->it = bs.chunk; */
 ok:
   DONATE();
-  infl_destroy(stream); /* TODO: stream cannot be re-used anymore, do we want this? */
   return UNZ_OK;
 noop:
-  infl_destroy(stream); /* TODO: stream cannot be re-used anymore, do we want this? */
   return UNZ_NOOP;
 err:
-  infl_destroy(stream); /* TODO: stream cannot be re-used anymore, do we want this? */
   return UNZ_ERR;
 }
 
