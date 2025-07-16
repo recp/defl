@@ -1,4 +1,4 @@
-# 🗜️ defl - deflate (WIP)
+# 🗜️ deflate
 
 <br>
 <p align="center">
@@ -48,6 +48,8 @@ Instead of embedding deflate anf huffman impl into my project, I decided to spli
 
 #### Usage 1: Use Non-Contiguous Chunk Api
 
+**defl** supports chunk based decompression to avoid duplicate compressed data if it is already on memory. `infl_include()` will include readonly pointer to compressed data. It will create chunks to each call but also accumulate small chunks togerher to prevent lot of allocations. `infl_destroy()` will free these allocated memories.
+
 ```c
 #include <defl/infl.h>
 
@@ -69,6 +71,8 @@ infl_destroy(st);
 
 #### Usage 2: Use Contiguous Chunk Api
 
+`infl_buf()` will decompress and free resources in one call.
+
 ```c
 #include <defl/infl.h>
 
@@ -84,6 +88,8 @@ if (!infl_buf(src, srclen, dst, dstlen 1)) {
 ```
 
 #### Usage 3: Use Stream Api ( TODO: WIP )
+
+With streaming api you can decompress 1 byte at a time ( or more bytes ). For instance instead of downloading large zip, you can decompress each time you received data on fly.
 
 ```c
 #include <defl/infl.h>

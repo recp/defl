@@ -125,6 +125,10 @@ infl_buf(const void * __restrict src,
  *  call infl_stream() whenever you have more data to decompress, and it will
  *  continue inflating the stream without waiting all data to be available.
  *
+ *  You can even call infl_stream() to decompress 1 byte at a time, it will
+ *  process the data incrementally and return UNZ_OK when the inflation is
+ *  complete.
+ *
  *  you must manually call infl_destroy() when you are done with the stream
  *
  * @param[in] stream  deflate stream
