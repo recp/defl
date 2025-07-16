@@ -42,6 +42,10 @@ Instead of embedding deflate anf huffman impl into my project, I decided to spli
 
 ---
 
+### Usage
+
+`infl_include()`, `infl_buf()` and `infl_stream()` includes memory as a readonly pointer. So dont free source memory until decompress. On exception is that small chunks are accumulated in internal buffer to reduce lot of chunk allocations. This design prevents duplicationg compressed data while decoding. If you really need to free source data then you can manually create chunks for duplicate whoe data if needed ( free later ). **defl** doesnt manage memory for you. Once decompression is finished `infl_destroy()` will be called internally to free some resources ( not all because some may be used for later needs ). An alternative destroy function may be provided to destroy all internal caches ( if any ) if **defl** no longer needed at any point on runtime.
+
 #### Usage 1: Use Non-Contiguous Chunk Api
 
 ```c
