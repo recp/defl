@@ -91,12 +91,7 @@ infl_strm_raw(defl_stream_t * __restrict stream) {
   }
 
   /* need 32 bits for header */
-  REFILL_STREAM(32);
-  if (bs.nbits < 32) {
-    DONATE();
-    return UNZ_UNFINISHED;
-  }
-
+  REFILL_STREAM_REQ(32);
   header = (uint32_t)bs.bits;
   CONSUME(32);
   
@@ -231,7 +226,7 @@ resume_copy:
   }
 
   /* successfully completed */
-  stream->dstpos             = dpos + len;
+  stream->dstpos          = dpos + len;
   stream->ss.raw.resuming = 0;  /* clear resume flag */
 
   DONATE();
@@ -341,7 +336,7 @@ infl_strm_blk(defl_stream_t          * __restrict stream,
 
     src = (unsigned)(dpos - dist);
 
-  backref:
+  /* backref: */
     /* save state for potential pause */
     stream->ss.blk.state          = BLOCK_STATE_BACKREF;
     stream->ss.blk.len            = len;

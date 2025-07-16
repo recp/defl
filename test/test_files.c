@@ -117,7 +117,8 @@ static double get_time(void) {
 
 static uint8_t*
 read_file(const char *path, size_t *size) {
-  FILE *f;
+  FILE    *f;
+  uint8_t *data;
 
   if (!(f = fopen(path, "rb")))
     return NULL; /* fail silently - caller handles missing files */
@@ -126,8 +127,7 @@ read_file(const char *path, size_t *size) {
   *size = ftell(f);
   fseek(f, 0, SEEK_SET);
 
-  uint8_t *data = malloc(*size);
-  if (!data) {
+  if (!(data = malloc(*size))) {
     fclose(f);
     return NULL;
   }
@@ -381,9 +381,10 @@ list_files(const char *dir, int *count) {
   return files;
 
 #else
-  DIR           *d;
-  struct dirent *entry;
+  DIR            *d;
+  struct dirent  *entry;
   char          **files;
+  int             i;
 
   if (!(d = opendir(dir))) {
     *count = 0;
@@ -400,9 +401,10 @@ list_files(const char *dir, int *count) {
     return NULL;
   }
 
+  i     = 0;
   files = malloc(*count * sizeof(char*));
   rewinddir(d);
-  int i = 0;
+
   while ((entry = readdir(d)) != NULL && i < *count) {
     if (entry->d_name[0] != '.') {
       files[i] = strdup(entry->d_name);
