@@ -382,13 +382,15 @@ infl_strm_blk(defl_stream_t          * __restrict stream,
         dst[dpos+3] = used;
         len-=4;dpos+=4;
       }
-      switch (len) {
-        case 3: dst[dpos+2] = used; /* fall through */
-        case 2: dst[dpos+1] = used; /* fall through */
-        case 1: dst[dpos]   = used; break;
-        case 0:                     break;
+      if (len >= 1) {
+        dst[dpos] = used;
+        switch (len - 1) {
+          case 2: dst[dpos+2] = used; /* fall through */
+          case 1: dst[dpos+1] = used; break;
+          case 0:                     break;
+        }
+        dpos += len;
       }
-      dpos += len;
     } else {
 #if defined(__ARM_NEON) || defined(__ARM_NEON__)
       if (len >= 16 && dist >= 16) {
@@ -398,6 +400,17 @@ infl_strm_blk(defl_stream_t          * __restrict stream,
         } while (len >= 16);
       }
 #endif
+      while (len >= 8) {
+        dst[dpos]   = dst[src];
+        dst[dpos+1] = dst[src+1];
+        dst[dpos+2] = dst[src+2];
+        dst[dpos+3] = dst[src+3];
+        dst[dpos+4] = dst[src+4];
+        dst[dpos+5] = dst[src+5];
+        dst[dpos+6] = dst[src+6];
+        dst[dpos+7] = dst[src+7];
+        len -= 8; dpos += 8; src += 8;
+      }
       while (len >= 4) {
         dst[dpos]   = dst[src];
         dst[dpos+1] = dst[src+1];
@@ -405,13 +418,15 @@ infl_strm_blk(defl_stream_t          * __restrict stream,
         dst[dpos+3] = dst[src+3];
         len-=4;dpos+=4;src+=4;
       }
-      switch (len) {
-        case 3: dst[dpos+2] = dst[src+2]; /* fall through */
-        case 2: dst[dpos+1] = dst[src+1]; /* fall through */
-        case 1: dst[dpos]   = dst[src]; break;
-        case 0:                         break;
+      if (len >= 1) {
+        dst[dpos] = dst[src];
+        switch (len - 1) {
+          case 2: dst[dpos+2] = dst[src+2]; /* fall through */
+          case 1: dst[dpos+1] = dst[src+1]; break;
+          case 0:                           break;
+        }
+        dpos += len;
       }
-      dpos += len;
     }
 
     /* clear state after successful backref copy */
