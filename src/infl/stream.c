@@ -95,13 +95,20 @@ infl_strm_raw(defl_stream_t * __restrict stream) {
       len  = remlen = header & 0xFFFF;
       nlen = header >> 16;
 
-      if (unlikely((len^(uint16_t)~nlen))) return UNZ_ERR;
-      if (unlikely(dpos+len > dlen))       return UNZ_EFULL;
-
       /* save state for potential resume */
       stream->ss.raw.len         = len;
       stream->ss.raw.remlen      = len;
       stream->ss.raw.header_read = true;
+
+      if (unlikely((len^(uint16_t)~nlen))) {
+        DONATE();
+        return UNZ_ERR;
+      }
+
+      if (unlikely(dpos+len > dlen)) {
+        DONATE();
+        return UNZ_EFULL;
+      }
     }
   }
 
@@ -443,7 +450,9 @@ infl_stream(infl_stream_t * __restrict stream,
   if (src && srclen > 0) {
     infl_include(stream, src, srclen);
     /* current chunk is extended */
-    if (stream->bs.end == stream->end->end - srclen) {
+    if (stream->bs.chunk
+        && stream->bs.chunk == stream->end
+        && stream->bs.end   == stream->end->end - srclen) {
       stream->bs.end = stream->end->end;
     }
   } else if (!stream->start || !stream->start->p) {
