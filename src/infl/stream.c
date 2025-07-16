@@ -544,6 +544,11 @@ hdr:
 
     /* process header - guaranteed to have enough data */
     zlib_header(stream, &stream->bs.chunk, true);
+
+    stream->bs.p   = stream->bs.chunk->p;
+    stream->bs.end = stream->bs.chunk->end;
+    bs.p           = stream->bs.p;
+    bs.end         = stream->bs.end;
   }
 
   bfinal = stream->ss.bfinal;
