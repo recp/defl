@@ -453,20 +453,23 @@ infl_stream(infl_stream_t * __restrict stream,
     }
   } else if (!stream->start || !stream->start->p) {
     /* empty data */
-    return UNZ_OK;
+    RESTORE();
+    goto ok;
   }
 
-  /* Check if already done */
-  if (stream->ss.state == INFL_STATE_DONE)
-    return UNZ_OK;
+  /* check if already done */
+  if (stream->ss.state == INFL_STATE_DONE) {
+    RESTORE();
+    goto ok;
+  }
 
   /* initial setup */
   if (!stream->bs.chunk && !(stream->bs.chunk = stream->start))
-    return UNZ_NOOP;
+    goto noop;
 
   /* if no data and not in middle of processing, return NOOP */
   if (!src && srclen == 0 && stream->ss.state == INFL_STATE_NONE)
-    return UNZ_NOOP;
+    goto noop;
 
   /* resume from saved state */
   if (stream->ss.state != INFL_STATE_NONE) {
@@ -482,7 +485,7 @@ infl_stream(infl_stream_t * __restrict stream,
       case INFL_STATE_DYNAMIC_HEADER:
       case INFL_STATE_DYNAMIC_CODELEN:
       case INFL_STATE_DYNAMIC_BLOCK: btype=2; goto blk_head_resume;
-      case INFL_STATE_DONE:                   return UNZ_OK;  /* already done */
+      case INFL_STATE_DONE:                   goto ok;  /* already done */
       default:                                break;
     }
   }
@@ -491,7 +494,7 @@ infl_stream(infl_stream_t * __restrict stream,
   if (!_init_s) {
     if (!huff_init_lsb_extof(&_tlitl_s,fxd,NULL,lvals,257,288) ||
         !huff_init_lsb_ext(&_tdist_s,fxd+288,NULL,dvals,32)) {
-      return UNZ_ERR;
+      goto err;
     }
     _init_s = true;
   }
@@ -736,10 +739,16 @@ fixed:
   }
 
   stream->ss.state = INFL_STATE_DONE;
+
+ok:
   DONATE();
+  infl_destroy(stream); /* TODO: stream cannot be re-used anymore, do we want this? */
   return UNZ_OK;
-  
+noop:
+  infl_destroy(stream); /* TODO: stream cannot be re-used anymore, do we want this? */
+  return UNZ_NOOP;
 err:
   stream->ss.state = INFL_STATE_NONE;  /* reset on error */
+  infl_destroy(stream); /* TODO: stream cannot be re-used anymore, do we want this? */
   return UNZ_ERR;
 }

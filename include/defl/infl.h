@@ -110,7 +110,9 @@ infl_buf(const void * __restrict src,
 
   infl_include(st, src, srclen);
   ret = infl(st);
-  infl_destroy(st);
+
+  /* this is called in infl() now */
+  /* infl_destroy(st); */
 
   return ret;
 }

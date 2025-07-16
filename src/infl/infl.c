@@ -435,16 +435,18 @@ infl(defl_stream_t * __restrict stream) {
   uint_fast8_t    btype, bfinal = 0;
 
   if (!stream->bs.chunk && !(stream->bs.chunk = stream->start))
-    return UNZ_NOOP;
+    goto noop;
 
-  if (!stream->start->p || stream->start->p == stream->start->end)
-    return UNZ_OK;
+  if (!stream->start->p || stream->start->p == stream->start->end) {
+    RESTORE();
+    goto ok;
+  }
 
   /* initilize static tables */
   if (!_init) {
     if (!huff_init_lsb_extof(&_tlitl,fxd,NULL,lvals,257,288) ||
         !huff_init_lsb_ext(&_tdist,fxd+288,NULL,dvals,32)) {
-      return UNZ_ERR;
+      goto err;
     }
     _init = true;
   }
@@ -540,9 +542,15 @@ infl(defl_stream_t * __restrict stream) {
   }
 
   /* stream->it = bs.chunk; */
+ok:
   DONATE();
+  infl_destroy(stream); /* TODO: stream cannot be re-used anymore, do we want this? */
   return UNZ_OK;
+noop:
+  infl_destroy(stream); /* TODO: stream cannot be re-used anymore, do we want this? */
+  return UNZ_NOOP;
 err:
+  infl_destroy(stream); /* TODO: stream cannot be re-used anymore, do we want this? */
   return UNZ_ERR;
 }
 

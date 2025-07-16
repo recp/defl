@@ -159,5 +159,4 @@ make
 - [x] implement inflate stream
 - [x] tests
 - [x] build
-- [ ] documentation
 - [ ] implement deflate
