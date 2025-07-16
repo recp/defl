@@ -65,50 +65,46 @@ infl_strm_raw(defl_stream_t * __restrict stream) {
   uint32_t        header, val;
   uint16_t        len, nlen;
 
-  /* check if we're resuming from saved state */
-  if (stream->ss.raw.resuming) {
-    /* restore saved state */
-    len    = stream->ss.raw.len;
-    remlen = stream->ss.raw.remlen;
-    dpos   = (unsigned)stream->dstpos;
-    /* dlen   = stream->dstlen; */
-    dst    = stream->dst + dpos;
-    RESTORE();
-    goto resume_copy;
-  }
-
-  dpos = (unsigned)stream->dstpos;
-  dlen = stream->dstlen;
   (void)simdlen; /* suppress unused warn */
 
   RESTORE();
 
-  /* align to byte boundary */
-  if (bs.nbits & 7) {
-    int shift = bs.nbits & 7;
-    bs.bits >>= shift;
-    bs.nbits -= shift;
+  dpos   = (unsigned)stream->dstpos;
+  dlen   = stream->dstlen;
+  len    = stream->ss.raw.len;
+  remlen = stream->ss.raw.remlen;
+  dst    = stream->dst + dpos + (len - remlen);
+
+  if (!stream->ss.raw.resuming) {
+    if (!stream->ss.raw.header_read) {
+      if (!stream->ss.raw.align_done) {
+        /* align to byte boundary */
+        if (bs.nbits & 7) {
+          int shift = bs.nbits & 7;
+          bs.bits >>= shift;
+          bs.nbits -= shift;
+        }
+        stream->ss.raw.align_done = true;
+      }
+
+      /* need 32 bits for header: 16 + 16 */
+      REFILL_STREAM_REQ(32);
+      header = (uint32_t)bs.bits;
+      CONSUME(32);
+
+      len  = remlen = header & 0xFFFF;
+      nlen = header >> 16;
+
+      if (unlikely((len^(uint16_t)~nlen))) return UNZ_ERR;
+      if (unlikely(dpos+len > dlen))       return UNZ_EFULL;
+
+      /* save state for potential resume */
+      stream->ss.raw.len         = len;
+      stream->ss.raw.remlen      = len;
+      stream->ss.raw.header_read = true;
+    }
   }
 
-  /* need 32 bits for header */
-  REFILL_STREAM_REQ(32);
-  header = (uint32_t)bs.bits;
-  CONSUME(32);
-  
-  len  = header & 0xFFFF;
-  nlen = header >> 16;
-
-  if (unlikely((len^(uint16_t)~nlen))) return UNZ_ERR;
-  if (unlikely(dpos+len > dlen))       return UNZ_EFULL;
-
-  remlen = len;
-  dst    = stream->dst + dpos;
-
-  /* save state for potential resume */
-  stream->ss.raw.len    = len;
-  stream->ss.raw.remlen = remlen;
-
-resume_copy:
   /* flush bs.bits */
   nbytes = bs.nbits >> 3;
   if (nbytes > 0 && remlen > 0) {
@@ -150,7 +146,6 @@ resume_copy:
         /* no more data available - save state and return */
         stream->ss.raw.resuming = 1;
         stream->ss.raw.remlen   = remlen;
-        stream->dstpos             = (size_t)(dst - stream->dst);
         DONATE();
         return UNZ_UNFINISHED;
       } else {
@@ -226,8 +221,13 @@ resume_copy:
   }
 
   /* successfully completed */
-  stream->dstpos          = dpos + len;
-  stream->ss.raw.resuming = 0;  /* clear resume flag */
+  stream->dstpos             = dpos + len;
+  stream->ss.raw.resuming    = 0;
+  stream->ss.raw.align_done  = 0;
+  stream->ss.raw.header_read = 0;
+  stream->ss.raw.resuming    = 0;
+  stream->ss.raw.len         = 0;
+  stream->ss.raw.remlen      = 0;
 
   DONATE();
   return UNZ_OK;
@@ -543,7 +543,7 @@ blk_head:
   while (!bfinal && bs.chunk) {
     stream->ss.state = INFL_STATE_BLOCK_HEADER;
 
-    REFILL_STREAM(3);
+    REFILL_STREAM_REQ(3);
     bfinal = bs.bits & 0x1;
     btype  = (bs.bits >> 1) & 0x3;
     CONSUME(3);

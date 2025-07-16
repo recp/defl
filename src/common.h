@@ -109,6 +109,8 @@ typedef struct {
   uint16_t len;
   uint16_t remlen;
   uint8_t  resuming;
+  uint8_t  align_done;
+  uint8_t  header_read;
 } raw_block_state_t;
 
 typedef struct {
