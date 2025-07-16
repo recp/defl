@@ -194,8 +194,8 @@ static size_t generate_fuzz_input(uint8_t *out, size_t max_size) {
 
 /* mutation strategies */
 static void mutate_data(uint8_t *data, size_t size) {
-  int    strategy, idx;
-  size_t start, len, i;
+  int     strategy, idx;
+  size_t  start, len, i;
   uint8_t tmp;
 
   strategy = simple_rand() % 5;
@@ -246,15 +246,19 @@ int main(int argc, char *argv[]) {
   int      i, ret;
   size_t   size, j;
 
-  data = malloc(100000);
-  output = malloc(MAX_OUTPUT_SIZE);
   iterations = 10000;
-  crashes = 0;
-  errors = 0;
-  success = 0;
+  crashes    = 0;
+  errors     = 0;
+  success    = 0;
 
-  if (!data || !output) {
+  if (!(data = malloc(100000))) {
     fprintf(stderr, "Memory allocation failed\n");
+    return 1;
+  }
+
+  if (!(output = malloc(MAX_OUTPUT_SIZE))) {
+    fprintf(stderr, "Memory allocation failed\n");
+    free(data);
     return 1;
   }
 
@@ -306,3 +310,4 @@ int main(int argc, char *argv[]) {
   return crashes > 0 ? 1 : 0;
 }
 #endif /* standalone fuzzer */
+
