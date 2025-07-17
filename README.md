@@ -87,7 +87,7 @@ if (!infl_buf(src, srclen, dst, dstlen 1)) {
 }
 ```
 
-#### Usage 3: Use Stream Api ( TODO: WIP )
+#### Usage 3: Use Stream Api
 
 With streaming api you can decompress 1 byte at a time ( or more bytes ). For instance instead of downloading large zip, you can decompress each time you received data on fly.
 
@@ -100,23 +100,59 @@ UnzResult     res;
 infl_init(&st, dst, dstlen, 1); /* 1: INFL_ZLIB or jsut pass INFL_ZLIB */
 
 /* decompress when new data avail */
-res = infl_stream(st, src, srclen);
+res = infl_stream(st, src1, srclen1);
 
 ...
 
 /* decompress again when previous response is UNZ_UNFINISHED */
 if (res == UNZ_UNFINISHED) {
-  res = infl_stream(st, src, srclen);
+  res = infl_stream(st, src2, srclen2);
 }
 
 ...
 if (res == UNZ_UNFINISHED) {
-  res = infl_stream(st, src, srclen);
+  res = infl_stream(st, src3, srclen3);
 }
 
 infl_destroy(st);
 ```
 
+## Example: Decode DEFLATE Chunk in PNG
+
+```C
+...
+infl_stream_t *pngdefl;
+...
+
+switch (chk_type) {
+    ...
+    case IM_PNG_TYPE('I','H','D','R'): {
+        pngdefl = infl_init(im->data.data, (uint32_t)im->len, 1);
+    } break;
+    case IM_PNG_TYPE('I','D','A','T'): {
+        /* With the new chunking system, small IDAT chunks will be automatically
+         * appended together, while large ones will be allocated directly.
+         * This is much more efficient for PNG files with many small IDAT chunks.
+         */
+        infl_include(pngdefl, p, chk_len);
+
+        /* or streaming api */
+        infl_stream(pngdefl, p, chk_len);
+    } break;
+...
+}
+
+...
+
+/* if infl_stream() is used in IM_PNG_TYPE('I','D','A','T'), skip this part */
+if (infl(pngdefl)) {
+  goto err;
+}
+
+...
+
+infl_destroy(pngdefl);
+```
 
 ## Building
 
