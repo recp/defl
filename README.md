@@ -143,7 +143,7 @@ switch (chk_type) {
 
 ...
 
-/* compress */
+/* decompress */
 if (infl(pngdefl)) {
   goto err;
 }
@@ -154,7 +154,7 @@ if (infl(pngdefl)) {
 infl_destroy(pngdefl);
 ```
 
-Using Streaming API:
+Using Streaming API ( this API is useful when we dont have all data in our local to decompress at once ):
 
 
 ```C
