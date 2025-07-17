@@ -684,8 +684,10 @@ fixed:
 
       dyn_codelen_resume:
         while (i < n) {
-          REFILL_STREAM_REQ(21);
+          /* save progress */
+          stream->ss.dyn.i = i;
 
+          REFILL_STREAM_REQ(21);
           fe = tcodelen[(uint8_t)bs.bits];
           if (unlikely(!fe.len || fe.sym > 18)) goto err;
           CONSUME(fe.len);
@@ -726,26 +728,9 @@ fixed:
                 stream->ss.dyn.prev   = 0;
               }
             } break;
-
-            case 17:  /* repeat zero 3-10 times */
-              repeat = 3 + (bs.bits & 0x7);
-              CONSUME(3);
-              if (i + repeat > n) goto err;
-              /* lens array already zero-initialized */
-              i += repeat;
-              break;
-
-            case 18:  /* repeat zero 11-138 times */
-              repeat = 11 + (bs.bits & 0x7F);
-              CONSUME(7);
-              if (i + repeat > n) goto err;
-              /* lens array already zero-initialized */
-              i += repeat;
-              break;
+            case 17: i+=(3  + (bs.bits & 0x7));  CONSUME(3); break;
+            case 18: i+=(11 + (bs.bits & 0x7F)); CONSUME(7); break;
           }
-
-          /* Save progress */
-          stream->ss.dyn.i = i;
         }
 
         /* build literal/length and distance tables */
