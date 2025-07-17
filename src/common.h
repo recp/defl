@@ -145,6 +145,7 @@ typedef struct unz__streaming_state_t {
   raw_block_state_t     raw;
   block_state_t         blk;
   dynamic_block_state_t dyn;
+  bool                  gothdr;
 } unz__streaming_state_t;
 
 struct unz__stream_t {

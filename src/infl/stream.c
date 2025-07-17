@@ -490,6 +490,15 @@ infl_stream(infl_stream_t * __restrict stream,
   if (!src && srclen == 0 && stream->ss.state == INFL_STATE_NONE)
     goto noop;
 
+  /* initialize static tables for streaming */
+  if (!_init_s) {
+    if (!huff_init_lsb_extof(&_tlitl_s,fxd,NULL,lvals,257,288) ||
+        !huff_init_lsb_ext(&_tdist_s,fxd+288,NULL,dvals,32)) {
+      goto err;
+    }
+    _init_s = true;
+  }
+
   /* resume from saved state */
   if (stream->ss.state != INFL_STATE_NONE) {
     bfinal = stream->ss.bfinal;
@@ -509,15 +518,6 @@ infl_stream(infl_stream_t * __restrict stream,
     }
   }
 
-  /* initialize static tables for streaming */
-  if (!_init_s) {
-    if (!huff_init_lsb_extof(&_tlitl_s,fxd,NULL,lvals,257,288) ||
-        !huff_init_lsb_ext(&_tdist_s,fxd+288,NULL,dvals,32)) {
-      goto err;
-    }
-    _init_s = true;
-  }
-
   /* initialize bit reader if needed */
   if (stream->ss.state == INFL_STATE_NONE) {
     stream->bs.p      = stream->start->p;
@@ -531,7 +531,7 @@ infl_stream(infl_stream_t * __restrict stream,
   RESTORE();
 
 hdr:
-  if (stream->flags == 1 && unlikely(!stream->header)) {
+  if (stream->flags == 1 && unlikely(!stream->header) && !stream->ss.gothdr) {
     unz_chunk_t *tmp;
     size_t       avail;
 
@@ -546,13 +546,13 @@ hdr:
     /* count available bytes */
     avail = 0;
     tmp   = stream->bs.chunk;
-    while (tmp && avail < 6) {
+    while (tmp && avail < 2) {
       avail += (tmp->end - tmp->p);
       tmp    = tmp->next;
     }
 
     /* wait for at least 6 bytes to handle worst case (header + dict) */
-    if (avail < 6) {
+    if (avail < 2) {
       DONATE();
       return UNZ_UNFINISHED;
     }
@@ -560,10 +560,16 @@ hdr:
     /* process header - guaranteed to have enough data */
     zlib_header(stream, &stream->bs.chunk, true);
 
-    stream->bs.p   = stream->bs.chunk->p;
-    stream->bs.end = stream->bs.chunk->end;
-    bs.p           = stream->bs.p;
-    bs.end         = stream->bs.end;
+    stream->bs.p      = stream->bs.chunk->p;
+    stream->bs.end    = stream->bs.chunk->end;
+    stream->ss.gothdr = true;
+
+    RESTORE();
+
+    if (bs.p == bs.end) {
+      DONATE();
+      return UNZ_UNFINISHED;
+    }
   }
 
   bfinal = stream->ss.bfinal;
