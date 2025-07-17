@@ -119,6 +119,8 @@ infl_destroy(st);
 
 ## Example: Decode DEFLATE Chunk in PNG
 
+Using Chunk Based API:
+
 ```C
 ...
 infl_stream_t *pngdefl;
@@ -135,20 +137,44 @@ switch (chk_type) {
          * This is much more efficient for PNG files with many small IDAT chunks.
          */
         infl_include(pngdefl, p, chk_len);
-
-        /* or streaming api */
-        infl_stream(pngdefl, p, chk_len);
     } break;
 ...
 }
 
 ...
 
-/* if infl_stream() is used in IM_PNG_TYPE('I','D','A','T'), skip this part */
+/* compress */
 if (infl(pngdefl)) {
   goto err;
 }
 
+/* undo filters */
+...
+
+infl_destroy(pngdefl);
+```
+
+Using Streaming API:
+
+
+```C
+...
+infl_stream_t *pngdefl;
+...
+
+switch (chk_type) {
+    ...
+    case IM_PNG_TYPE('I','H','D','R'): {
+        pngdefl = infl_init(im->data.data, (uint32_t)im->len, 1);
+    } break;
+    case IM_PNG_TYPE('I','D','A','T'): {
+        /* or streaming api */
+        infl_stream(pngdefl, p, chk_len);
+    } break;
+...
+}
+
+/* undo filters */
 ...
 
 infl_destroy(pngdefl);
