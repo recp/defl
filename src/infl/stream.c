@@ -648,8 +648,7 @@ fixed:
         n     = hlit + hdist;
         CONSUME(14);
 
-        if (hlit > 286 || hdist > 30 || n > MAX_LITLEN_CODES + MAX_DIST_CODES)
-          goto err;
+        if (n > MAX_LITLEN_CODES + MAX_DIST_CODES) goto err;
 
         /* initialize state */
         stream->ss.dyn.hlit   = hlit;
