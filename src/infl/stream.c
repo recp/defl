@@ -667,11 +667,12 @@ fixed:
 
       dyn_hdr_resume:
         for (; i < hclen; i++) {
+          stream->ss.dyn.i = i;
           REFILL_STREAM_REQ(3);
           stream->ss.dyn.codelens[ord[i]] = bs.bits & 0x7;
           CONSUME(3);
-          stream->ss.dyn.i = i + 1;
         }
+        stream->ss.dyn.i = hclen;
 
         if (!huff_init_fast_lsb(tcodelen,stream->ss.dyn.codelens,NULL,MAX_CODELEN_CODES))
           goto err;
