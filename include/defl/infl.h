@@ -19,9 +19,6 @@
 
 #include "common.h"
 
-/* inflate flags */
-#define INFL_ZLIB 1
-
 /*!
  * @brief initialize inflate stream the destination must be a known-size addr
  *
@@ -33,7 +30,7 @@
  */
 UNZ_EXPORT
 infl_stream_t*
-infl_init(const void * __restrict dst, uint32_t dstlen, int flags);
+infl_init(void * __restrict dst, uint32_t dstlen, int flags);
 
 /*!
  * @brief appends a chunk to unzip stream to uncompress, the chunks may be
@@ -98,7 +95,7 @@ UNZ_INLINE
 int
 infl_buf(const void * __restrict src,
          uint32_t                srclen,
-         const void * __restrict dst,
+         void     * __restrict dst,
          uint32_t                dstlen,
          int                     flags) {
   infl_stream_t *st;

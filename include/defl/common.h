@@ -95,6 +95,9 @@ typedef struct unz__stream_t defl_stream_t;
 typedef struct unz__stream_t infl_stream_t;
 typedef struct unz__chunk_t  defl_chunk_t;
 
+/* inflate flags */
+#define INFL_ZLIB 1
+
 #ifdef __cplusplus
 }
 #endif

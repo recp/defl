@@ -186,7 +186,7 @@ infl_block(defl_stream_t          * __restrict stream,
       return UNZ_ERR;
     CONSUME(used);
 
-    if (unlikely((dpos + len) > dst_cap))
+    if (unlikely(len > dst_cap - dpos))
       return UNZ_EFULL;
 
     /* output back-reference */
@@ -558,7 +558,7 @@ err:
 
 UNZ_EXPORT
 defl_stream_t *
-infl_init(const void * __restrict dst, uint32_t dstlen, int flags) {
+infl_init(void * __restrict dst, uint32_t dstlen, int flags) {
   infl_stream_t *st;
 
   st          = calloc(1, sizeof(*st));
