@@ -27,19 +27,20 @@ getbyt(defl_chunk_t ** __restrict chunkref,
 
   ch = *chunkref;
 
-  /* empty chnuk is not allowed */
-  if (ch->p == ch->end && ch->next) {
+  if (!ch)
+    return UNZ_ERR;
+
+  while ((!ch->p || ch->p >= ch->end) && ch->next) {
     ch        = ch->next;
     *chunkref = ch;
   }
 
-  if (ch->p) {
-    *dst        = *ch->p++;
-    ch->bitpos += 8;
-    return UNZ_OK;
-  } else {
+  if (!ch->p || ch->p >= ch->end)
     return UNZ_ERR;
-  }
+
+  *dst        = *ch->p++;
+  ch->bitpos += 8;
+  return UNZ_OK;
 }
 
 UNZ_INLINE
@@ -48,31 +49,28 @@ zlib_header(defl_stream_t * __restrict stream,
             defl_chunk_t ** __restrict chunkref,
             bool                       nodict) {
   UnzResult res;
-  uint8_t   cmf, cm, fdict, flags /*, cinfo, fcheck, flevel*/;
+  uint8_t   cmf, cm, cinfo, fdict, flags /*, fcheck, flevel*/;
 
   (void)stream;
+  (void)nodict;
 
-  /**
-   * nodict: PNG spec doesnt allow dict so give a chance to skip fdict and fdict
-   *         errors.
-   */
   if ((res = getbyt(chunkref, &cmf)) != UNZ_OK) { return res; }
 
   cm    = cmf & 0xf;
-  /* cinfo = cmf >> 4; */
+  cinfo = cmf >> 4;
 
   if ((res = getbyt(chunkref, &flags)) != UNZ_OK) { return res; }
 
-  fdict  = (flags & 0x10) >> 4;
+  fdict  = (flags & 0x20) >> 5;
   /*
   fcheck = flags & 0xf;
   flevel = (flags & 0xe0) >> 5;
    */
 
-  /* validate compression method, 8: DEFLATE */
-  if (cm != 8) {
+  /* validate compression method, 8: DEFLATE, and 32K max window */
+  if (cm != 8 || cinfo > 7) {
 #ifdef DEBUG
-    printf("Error: Unsupported compression method (CM = %d)\n", cm);
+    printf("Error: Unsupported zlib header (CM = %d, CINFO = %d)\n", cm, cinfo);
 #endif
     return UNZ_ERR;
   }
@@ -85,27 +83,14 @@ zlib_header(defl_stream_t * __restrict stream,
     printf("Checksum validation: ((CMF << 8) + FLG) %% 31 = %d\n",
            ((cmf << 8) + flags) % 31);
 #endif
-
-    if (!nodict)
-      return UNZ_ERR;
+    return UNZ_ERR;
   }
 
-  /* Handle preset dictionaries */
-  if (!nodict && fdict) {
-    uint8_t  dictbyt[4];
+  if (fdict) {
 #ifdef DEBUG
-    uint32_t dictid;
+    printf("Error: zlib preset dictionaries are not supported\n");
 #endif
-
-    if ((res = getbyt(chunkref, &dictbyt[0])) != UNZ_OK) { return res; }
-    if ((res = getbyt(chunkref, &dictbyt[1])) != UNZ_OK) { return res; }
-    if ((res = getbyt(chunkref, &dictbyt[2])) != UNZ_OK) { return res; }
-    if ((res = getbyt(chunkref, &dictbyt[3])) != UNZ_OK) { return res; }
-
-#ifdef DEBUG
-    dictid = (dictbyt[0]<<24)|(dictbyt[1]<<16)|(dictbyt[2]<<8)|dictbyt[3];
-    printf("FDICT set. Dictionary ID: 0x%x\n", dictid);
-#endif
+    return UNZ_ERR;
   }
 
   return UNZ_OK;

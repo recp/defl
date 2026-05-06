@@ -22,6 +22,7 @@
 #include <stdbool.h>
 #include <time.h>
 #include <defl/infl.h>
+#include <huff/huff.h>
 
 /* platform-specific directory handling */
 #ifdef _WIN32
@@ -422,6 +423,41 @@ static int cmpstr(const void *a, const void *b) {
 }
 
 static void
+test_expect_inflate_error(const char    *name,
+                          const uint8_t *src,
+                          size_t         srclen,
+                          int            flags) {
+  double  start_time, elapsed;
+  char    err_msg[256], details[64];
+  uint8_t output[32];
+  int     ret;
+  bool    passed;
+
+  start_time = get_time();
+  memset(output,  0, sizeof(output));
+  memset(err_msg, 0, sizeof(err_msg));
+  memset(details, 0, sizeof(details));
+
+  ret    = infl_buf(src, (uint32_t)srclen, output, sizeof(output), flags);
+  passed = (ret != UNZ_OK);
+
+  if (!passed) {
+    snprintf(err_msg, sizeof(err_msg), "should have rejected invalid input");
+  } else {
+    snprintf(details, sizeof(details), "rejected, error=%d", ret);
+  }
+
+  if (passed) { g_results.passed++; }
+  else        { g_results.failed++; }
+  g_results.total++;
+
+  elapsed = get_time() - start_time;
+  g_results.total_time += elapsed;
+  print_test_result(name, passed, elapsed,
+                    passed ? NULL : err_msg, passed ? details : NULL);
+}
+
+static void
 test_error_conditions(void) {
   double  start_time, elapsed;
   char    err_msg[256], details[64];
@@ -431,6 +467,9 @@ test_error_conditions(void) {
 
   const uint8_t truncated[]       = {0x78, 0x9C}; /* Just ZLIB header,no data */
   const uint8_t invalid_block[]   = {0x07};       /* BTYPE=11 (invalid)       */
+  const uint8_t invalid_zlib_cm[] = {0x00, 0x00, 0x03, 0x00};
+  const uint8_t invalid_zlib_chk[]= {0x78, 0x00, 0x03, 0x00};
+  const uint8_t invalid_zlib_dict[]={0x78, 0xBB, 0x00, 0x00, 0x00, 0x00, 0x03, 0x00};
   const uint8_t large_data_full[] = {
     0x01, 0x0A, 0x00, 0xF5, 0xFF,                 /* 10 bytes uncompressed    */
     'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J'
@@ -494,6 +533,84 @@ test_error_conditions(void) {
   elapsed = get_time() - start_time;
   g_results.total_time += elapsed;
   print_test_result("truncated_stream", passed, elapsed,
+                    passed ? NULL : err_msg, passed ? details : NULL);
+
+  test_expect_inflate_error("invalid_zlib_method",
+                            invalid_zlib_cm, sizeof(invalid_zlib_cm), INFL_ZLIB);
+  test_expect_inflate_error("invalid_zlib_checksum",
+                            invalid_zlib_chk, sizeof(invalid_zlib_chk), INFL_ZLIB);
+  test_expect_inflate_error("unsupported_zlib_dictionary",
+                            invalid_zlib_dict, sizeof(invalid_zlib_dict), INFL_ZLIB);
+}
+
+static void
+test_huff_error_conditions(void) {
+  double       start_time, elapsed;
+  char         err_msg[256], details[64];
+  huff_table_t table;
+  uint8_t      used;
+  uint_fast16_t sym;
+  bool         passed;
+
+  const uint8_t  invalid_lengths[] = {17};
+  const uint8_t  oversubscribed[]  = {1, 1, 1};
+  const uint8_t  map_lengths[]     = {1, 1};
+  const uint16_t map_symbols[]     = {42, 99};
+
+  start_time = get_time();
+  memset(err_msg, 0, sizeof(err_msg));
+  memset(details, 0, sizeof(details));
+  memset(&table, 0, sizeof(table));
+
+  passed = !huff_init_lsb(&table, invalid_lengths, NULL, 1);
+  if (!passed) snprintf(err_msg, sizeof(err_msg), "accepted length > max");
+  else         snprintf(details, sizeof(details), "invalid length rejected");
+
+  if (passed) { g_results.passed++; }
+  else        { g_results.failed++; }
+  g_results.total++;
+
+  elapsed = get_time() - start_time;
+  g_results.total_time += elapsed;
+  print_test_result("huff_invalid_length", passed, elapsed,
+                    passed ? NULL : err_msg, passed ? details : NULL);
+
+  start_time = get_time();
+  memset(&table, 0, sizeof(table));
+
+  passed = !huff_init_lsb(&table, oversubscribed, NULL, 3);
+  if (!passed) snprintf(err_msg, sizeof(err_msg), "accepted oversubscribed tree");
+  else         snprintf(details, sizeof(details), "oversubscription rejected");
+
+  if (passed) { g_results.passed++; }
+  else        { g_results.failed++; }
+  g_results.total++;
+
+  elapsed = get_time() - start_time;
+  g_results.total_time += elapsed;
+  print_test_result("huff_oversubscribed_tree", passed, elapsed,
+                    passed ? NULL : err_msg, passed ? details : NULL);
+
+  start_time = get_time();
+  memset(&table, 0, sizeof(table));
+
+  used = 0;
+  passed = huff_init_lsb(&table, map_lengths, map_symbols, 2);
+  if (passed) {
+    sym    = huff_decode_lsb(&table, 0, 1, &used);
+    passed = (used == 1 && sym == 42);
+  }
+
+  if (!passed) snprintf(err_msg, sizeof(err_msg), "symbols mapping ignored");
+  else         snprintf(details, sizeof(details), "decoded symbol 42");
+
+  if (passed) { g_results.passed++; }
+  else        { g_results.failed++; }
+  g_results.total++;
+
+  elapsed = get_time() - start_time;
+  g_results.total_time += elapsed;
+  print_test_result("huff_symbols_mapping", passed, elapsed,
                     passed ? NULL : err_msg, passed ? details : NULL);
 }
 
@@ -629,6 +746,85 @@ test_file_streaming(const char *filename) {
   } else {
     g_results.passed++;
     snprintf(details, sizeof(details), "%d chunks", chunk_count);
+  }
+
+  elapsed = get_time() - start_time;
+  g_results.total_time += elapsed;
+  print_test_result(test_name, passed, elapsed,
+                    passed ? NULL : err_msg, passed ? details : NULL);
+
+  infl_destroy(stream);
+  free(orig_data);
+  free(comp_data);
+  free(output);
+}
+
+static void
+test_file_streaming_bytewise(const char *filename) {
+  double         start_time, elapsed;
+  char           test_name[256], err_msg[256], details[64];
+  char           raw_path[512], compr_path[512];
+  uint8_t       *orig_data, *comp_data, *output;
+  infl_stream_t *stream;
+  size_t         orig_size, compr_size, pos;
+  int            result, empty_attempts;
+  bool           passed;
+
+  start_time = get_time();
+  memset(err_msg, 0, sizeof(err_msg));
+  memset(details, 0, sizeof(details));
+
+  snprintf(test_name,  sizeof(test_name),  "%s_streaming_1byte", filename);
+  snprintf(raw_path,   sizeof(raw_path),   "data/raw/%s",        filename);
+  snprintf(compr_path, sizeof(compr_path), "data/compressed/%s", filename);
+
+  if (!(orig_data = read_file(raw_path,   &orig_size)))  { return; }
+  if (!(comp_data = read_file(compr_path, &compr_size))) {
+    free(orig_data);
+    return;
+  }
+
+  if (!(output = calloc(1, orig_size + 1000))) {
+    snprintf(err_msg, sizeof(err_msg), "allocation failed");
+    free(orig_data);
+    free(comp_data);
+    g_results.failed++;
+    g_results.total++;
+    print_test_result(test_name, false, get_time() - start_time, err_msg, NULL);
+    return;
+  }
+
+  stream = infl_init(output, (uint32_t)orig_size + 1000, 0);
+  if (!stream) {
+    snprintf(err_msg, sizeof(err_msg), "stream init failed");
+    free(orig_data);
+    free(comp_data);
+    free(output);
+    g_results.failed++;
+    g_results.total++;
+    print_test_result(test_name, false, get_time() - start_time, err_msg, NULL);
+    return;
+  }
+
+  result = UNZ_UNFINISHED;
+  for (pos = 0; pos < compr_size && result == UNZ_UNFINISHED; pos++) {
+    result = infl_stream(stream, comp_data + pos, 1);
+  }
+
+  empty_attempts = 0;
+  while (result == UNZ_UNFINISHED && empty_attempts++ < 32) {
+    result = infl_stream(stream, NULL, 0);
+  }
+
+  g_results.total++;
+  passed = (result == UNZ_OK && memcmp(orig_data, output, orig_size) == 0);
+  if (!passed) {
+    if (result != UNZ_OK) snprintf(err_msg, sizeof(err_msg), "bytewise streaming error %d", result);
+    else                  snprintf(err_msg, sizeof(err_msg), "bytewise streaming data mismatch");
+    g_results.failed++;
+  } else {
+    g_results.passed++;
+    snprintf(details, sizeof(details), "%zu one-byte chunks", compr_size);
   }
 
   elapsed = get_time() - start_time;
@@ -891,8 +1087,20 @@ int main(int argc, char *argv[]) {
     }
   }
 
+  found = false;
+  for (j = 0; j < file_count; j++) {
+    if (strcmp(files[j], "png_simulation") == 0) {
+      found = true;
+      break;
+    }
+  }
+  if (found) {
+    test_file_streaming_bytewise("png_simulation");
+  }
+
   /* additional tests */
   test_error_conditions();
+  test_huff_error_conditions();
   test_regression_cases();
   test_streaming_edge_cases();
 

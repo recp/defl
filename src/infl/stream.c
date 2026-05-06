@@ -127,8 +127,10 @@ infl_strm_raw(defl_stream_t * __restrict stream) {
     } else {
       for (i = 0; i < nbytes; i++) dst[i] = (uint8_t)(bs.bits >> (i << 3));
     }
-    bs.bits >>= (nbytes << 3);
-    bs.nbits -= (int)(nbytes << 3);
+    i = nbytes << 3;
+    if (i == sizeof(bs.bits) * 8) bs.bits = 0;
+    else                          bs.bits >>= i;
+    bs.nbits -= (int)i;
     dst      += nbytes;
     remlen   -= nbytes;
   }
@@ -138,8 +140,10 @@ infl_strm_raw(defl_stream_t * __restrict stream) {
   if (nbytes > 0 && remlen > 0) {
     nbytes     = (nbytes < remlen) ? nbytes : remlen;
     for (i = 0; i < nbytes; i++) dst[i] = (uint8_t)(bs.pbits >> (i << 3));
-    bs.pbits >>= (nbytes << 3);
-    bs.npbits -= (int)(nbytes << 3);
+    i = nbytes << 3;
+    if (i == sizeof(bs.pbits) * 8) bs.pbits = 0;
+    else                           bs.pbits >>= i;
+    bs.npbits -= (int)i;
     dst       += nbytes;
     remlen    -= nbytes;
   }
@@ -286,9 +290,18 @@ infl_strm_blk(defl_stream_t          * __restrict stream,
   while (true) {
     REFILL_STREAM_BLK(21);
 
-    lsym = huff_decode_lsb_extof(tlit, bs.bits, &used, &len, 257);
-    if (!used || used > bs.nbits) {
-      UNFINISHED_BLK();
+    if (likely(bs.nbits >= 21)) {
+      lsym = huff_decode_lsb_extof(tlit, bs.bits, &used, &len, 257);
+      if (unlikely(!used)) {
+        *dst_pos = dpos;
+        DONATE();
+        return UNZ_ERR;
+      }
+    } else {
+      lsym = huff_decode_lsb_extof_safe(tlit, bs.bits, (uint8_t)bs.nbits, &used, &len, 257);
+      if (!used) {
+        UNFINISHED_BLK();
+      }
     }
 
     if (lsym > 285) {
@@ -322,12 +335,21 @@ infl_strm_blk(defl_stream_t          * __restrict stream,
   distance:
     REFILL_STREAM_BLK(29);
 
-    dist = huff_decode_lsb_ext(tdist, bs.bits, &used);
-    if (!used || used > bs.nbits) {
-      UNFINISHED_BLK();
+    if (likely(bs.nbits >= 29)) {
+      dist = huff_decode_lsb_ext(tdist, bs.bits, &used);
+      if (unlikely(!used)) {
+        *dst_pos = dpos;
+        DONATE();
+        return UNZ_ERR;
+      }
+    } else {
+      dist = huff_decode_lsb_ext_safe(tdist, bs.bits, (uint8_t)bs.nbits, &used);
+      if (!used) {
+        UNFINISHED_BLK();
+      }
     }
 
-    if (unlikely(dist > dpos)) {
+    if (unlikely((size_t)(dist - 1) >= dpos)) {
       *dst_pos = dpos;
       DONATE();
       return UNZ_ERR; /* validate distance */
@@ -335,7 +357,7 @@ infl_strm_blk(defl_stream_t          * __restrict stream,
 
     CONSUME(used);
 
-    if (unlikely((dpos + len) > dst_cap)) {
+    if (unlikely(len > dst_cap - dpos)) {
       *dst_pos = dpos;
       DONATE();
       return UNZ_EFULL;
@@ -551,18 +573,19 @@ hdr:
       tmp    = tmp->next;
     }
 
-    /* wait for at least 6 bytes to handle worst case (header + dict) */
+    /* wait for the fixed zlib header; preset dictionaries are unsupported */
     if (avail < 2) {
       DONATE();
       return UNZ_UNFINISHED;
     }
 
-    /* process header - guaranteed to have enough data */
-    zlib_header(stream, &stream->bs.chunk, true);
+    if (zlib_header(stream, &stream->bs.chunk, true) != UNZ_OK)
+      goto err;
 
     stream->bs.p      = stream->bs.chunk->p;
     stream->bs.end    = stream->bs.chunk->end;
     stream->ss.gothdr = true;
+    stream->header    = stream;
 
     RESTORE();
 
@@ -629,7 +652,7 @@ fixed:
 
           i = stream->ss.dyn.i;
           goto dyn_codelen_resume;
-        } else if (stream->ss.state == INFL_STATE_DYNAMIC_HEADER && stream->ss.dyn.i > 0) {
+        } else if (stream->ss.state == INFL_STATE_DYNAMIC_HEADER && stream->ss.dyn.n > 0) {
           hlit  = stream->ss.dyn.hlit;
           hdist = stream->ss.dyn.hdist;
           hclen = stream->ss.dyn.hclen;
@@ -728,8 +751,16 @@ fixed:
                 stream->ss.dyn.prev   = 0;
               }
             } break;
-            case 17: i+=(3  + (bs.bits & 0x7));  CONSUME(3); break;
-            case 18: i+=(11 + (bs.bits & 0x7F)); CONSUME(7); break;
+            case 17:
+              repeat = 3 + (bs.bits & 0x7); CONSUME(3);
+              if (i + repeat > n) goto err;
+              i += repeat;
+              break;
+            case 18:
+              repeat = 11 + (bs.bits & 0x7F); CONSUME(7);
+              if (i + repeat > n) goto err;
+              i += repeat;
+              break;
           }
         }
 

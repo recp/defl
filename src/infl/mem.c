@@ -39,105 +39,77 @@
 #  define ALIGNED_FREE(ptr) free(ptr)
 #endif
 
-/* initialize chunk pool */
-static bool
-infl_init_chunk_pool(infl_stream_t * __restrict stream) {
-  int i;
-  
-  stream->current_appendable    = NULL;
-  stream->pool_used             = 0;
-  stream->struct_pool_used      = 0;
-  stream->struct_pool_available = 0;
-  
-  /* pre-allocate chunk structures for pooling */
-  for (i = 0; i < UNZ_CHUNK_STRUCT_POOL_SIZE; i++) {
-    stream->chunk_struct_pool[i] = calloc(1, sizeof(unz_chunk_t));
-    if (!stream->chunk_struct_pool[i]) {
-      /* cleanup on failure */
-      while (--i >= 0) {
-        free(stream->chunk_struct_pool[i]);
-      }
-      return false;
-    }
-    stream->struct_pool_available++;
-  }
-  
-  /* pre-allocate appendable chunk structures and buffers */
-  for (i = 0; i < UNZ_CHUNK_POOL_SIZE; i++) {
-    stream->chunk_pool[i] = calloc(1, sizeof(unz_chunk_t));
-    if (!stream->chunk_pool[i]) {
-      /* cleanup on failure */
-      while (--i >= 0) {
-        free(stream->chunk_buffers[i]);
-        free(stream->chunk_pool[i]);
-      }
-      /* cleanup struct pool too */
-      for (int j = 0; j < UNZ_CHUNK_STRUCT_POOL_SIZE; j++) {
-        free(stream->chunk_struct_pool[j]);
-      }
-      return false;
-    }
-    
-    /* allocate aligned buffer for better performance */
-    if (ALIGNED_ALLOC(&stream->chunk_buffers[i], 64, UNZ_CHUNK_PAGE_SIZE) != 0) {
-      stream->chunk_buffers[i] = malloc(UNZ_CHUNK_PAGE_SIZE);
-      if (!stream->chunk_buffers[i]) {
-        /* cleanup on failure */
-        free(stream->chunk_pool[i]);
-        while (--i >= 0) {
-          ALIGNED_FREE(stream->chunk_buffers[i]);
-          free(stream->chunk_pool[i]);
-        }
-        /* cleanup struct pool too */
-        for (int j = 0; j < UNZ_CHUNK_STRUCT_POOL_SIZE; j++) {
-          free(stream->chunk_struct_pool[j]);
-        }
-        return false;
-      }
-    }
-    
-    /* initialize chunk */
-    stream->chunk_pool[i]->buffer        = stream->chunk_buffers[i];
-    stream->chunk_pool[i]->buffer_size   = UNZ_CHUNK_PAGE_SIZE;
-    stream->chunk_pool[i]->used          = 0;
-    stream->chunk_pool[i]->is_pooled     = true;
-    stream->chunk_pool[i]->is_appendable = true;
-    stream->chunk_pool[i]->next          = NULL;
-  }
-  
-  return true;
-}
-
 /* get a chunk from pool or create new one */
 static unz_chunk_t *
 get_pooled_chunk(infl_stream_t * __restrict stream) {
   unz_chunk_t *chk;
-  if (stream->pool_used < UNZ_CHUNK_POOL_SIZE) {
-    chk       = stream->chunk_pool[stream->pool_used++];
-    chk->used = 0;
-    chk->p    = chk->buffer;
-    chk->end  = chk->buffer;
-    return chk;
+  int          idx;
+
+  if (stream->pool_used >= UNZ_CHUNK_POOL_SIZE)
+    return NULL;
+
+  idx = stream->pool_used;
+  chk = stream->chunk_pool[idx];
+
+  if (!chk) {
+    chk = calloc(1, sizeof(*chk));
+    if (!chk)
+      return NULL;
+
+    if (ALIGNED_ALLOC(&stream->chunk_buffers[idx], 64, UNZ_CHUNK_PAGE_SIZE) != 0) {
+#ifdef _WIN32
+      free(chk);
+      return NULL;
+#else
+      stream->chunk_buffers[idx] = malloc(UNZ_CHUNK_PAGE_SIZE);
+      if (!stream->chunk_buffers[idx]) {
+        free(chk);
+        return NULL;
+      }
+#endif
+    }
+
+    chk->buffer        = stream->chunk_buffers[idx];
+    chk->buffer_size   = UNZ_CHUNK_PAGE_SIZE;
+    chk->is_pooled     = true;
+    chk->is_appendable = true;
+    stream->chunk_pool[idx] = chk;
   }
-  return NULL;
+
+  stream->pool_used = idx + 1;
+  chk->used         = 0;
+  chk->p            = chk->buffer;
+  chk->end          = chk->buffer;
+  chk->next         = NULL;
+  return chk;
 }
 
 /* get a chunk structure from the struct pool */
 static unz_chunk_t *
 get_pooled_chunk_struct(infl_stream_t * __restrict stream) {
   unz_chunk_t *chk;
-  if (stream->struct_pool_available > 0) {
-    chk = stream->chunk_struct_pool[stream->struct_pool_used++];
-    stream->struct_pool_available--;
+  int          idx;
 
-    /* reset the chunk structure */
-    memset(chk, 0, sizeof(*chk));
-    chk->is_pooled     = true;
-    chk->is_appendable = false;
-    
-    return chk;
+  if (stream->struct_pool_used >= UNZ_CHUNK_STRUCT_POOL_SIZE)
+    return NULL;
+
+  idx = stream->struct_pool_used;
+  chk = stream->chunk_struct_pool[idx];
+  if (!chk) {
+    chk = calloc(1, sizeof(*chk));
+    if (!chk)
+      return NULL;
+    stream->chunk_struct_pool[idx] = chk;
   }
-  return NULL;
+
+  stream->struct_pool_used      = idx + 1;
+  stream->struct_pool_available = UNZ_CHUNK_STRUCT_POOL_SIZE - stream->struct_pool_used;
+
+  memset(chk, 0, sizeof(*chk));
+  chk->is_pooled     = true;
+  chk->is_appendable = false;
+
+  return chk;
 }
 
 /* prefetch data for better performance */
@@ -188,7 +160,9 @@ fast_memcpy(uint8_t * __restrict dst, const uint8_t * __restrict src, size_t len
 
   /* handle remaining bytes with unrolled loops */
   for (; i + 7 < len; i += 8) {
-    *(uint64_t*)(dst + i) = *(uint64_t*)(src + i);
+    uint64_t word;
+    memcpy(&word, src + i, sizeof(word));
+    memcpy(dst + i, &word, sizeof(word));
   }
 
   /* handle final bytes */
@@ -209,13 +183,6 @@ infl_include(infl_stream_t * __restrict stream,
              const void    * __restrict ptr,
              uint32_t                   len) {
   unz_chunk_t *chk;
-  
-  /* initialize pool on first use */
-  if (stream->pool_used == 0 && !stream->chunk_pool[0]) {
-    if (!infl_init_chunk_pool(stream)) {
-      goto fallback_alloc;
-    }
-  }
   
   /* prefetch source data for better performance */
   if (len >= 256) {
