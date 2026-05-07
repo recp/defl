@@ -136,4 +136,13 @@ infl_stream(infl_stream_t * __restrict stream,
             const void    * __restrict src,
             uint32_t                   srclen);
 
+/*!
+ * @brief current number of bytes produced by an inflate stream
+ *
+ * @param[in] stream  deflate stream
+ */
+UNZ_EXPORT
+uint32_t
+infl_output_pos(const infl_stream_t * __restrict stream);
+
 #endif /* infl_h */

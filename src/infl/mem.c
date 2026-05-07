@@ -289,6 +289,12 @@ infl_reset_pool(infl_stream_t * __restrict stream) {
 }
 
 UNZ_EXPORT
+uint32_t
+infl_output_pos(const infl_stream_t * __restrict stream) {
+  return stream ? (uint32_t)stream->dstpos : 0u;
+}
+
+UNZ_EXPORT
 void
 infl_destroy(defl_stream_t * __restrict stream) {
   unz_chunk_t *chk, *tofree;
