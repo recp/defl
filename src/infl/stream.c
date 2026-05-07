@@ -54,6 +54,15 @@
 #define REFILL_STREAM_BLK(req)      REFILL_STREAM_X(req,SOFTBITS(UNFINISHED_BLK()))
 #define REFILL_STREAM(req)          REFILL_STREAM_X(req,SOFTBITS(UNFINISHED()))
 #define REFILL_STREAM_REQ(req)      REFILL_STREAM_X(req,REQBITS(UNFINISHED(),req))
+#define OUT_FULL(NEED) unlikely(dpos > dst_cap || (NEED) > dst_cap - dpos)
+#define FULL_BLK() do {                                                        \
+  stream->ss.blk.len            = len;                                         \
+  stream->ss.blk.src            = src;                                         \
+  stream->ss.blk.copy_remaining = len;                                         \
+  *dst_pos = dpos;                                                             \
+  DONATE();                                                                    \
+  return UNZ_EFULL;                                                            \
+} while (0)
 
 static UNZ_HOT
 UnzResult
@@ -310,8 +319,6 @@ infl_strm_blk(defl_stream_t          * __restrict stream,
       return UNZ_ERR; /* invalid symbol */
     }
 
-    CONSUME(used);
-
     if (lsym < 256) {
       /* literal byte */
       if (unlikely(dpos >= dst_cap)) {
@@ -319,6 +326,7 @@ infl_strm_blk(defl_stream_t          * __restrict stream,
         DONATE();
         return UNZ_EFULL;
       }
+      CONSUME(used);
       dst[dpos++] = (uint8_t)lsym;
 
       /* clear state after successful literal */
@@ -326,11 +334,19 @@ infl_strm_blk(defl_stream_t          * __restrict stream,
       continue;
     } else if (unlikely(lsym == 256)) {
       /* eof */
+      CONSUME(used);
       break;
     }
 
+    CONSUME(used);
+
     stream->ss.blk.state = BLOCK_STATE_LENGTH;
     stream->ss.blk.len   = len;
+    if (OUT_FULL(len)) {
+      *dst_pos = dpos;
+      DONATE();
+      return UNZ_EFULL;
+    }
 
   distance:
     REFILL_STREAM_BLK(29);
@@ -357,12 +373,6 @@ infl_strm_blk(defl_stream_t          * __restrict stream,
 
     CONSUME(used);
 
-    if (unlikely(len > dst_cap - dpos)) {
-      *dst_pos = dpos;
-      DONATE();
-      return UNZ_EFULL;
-    }
-
     src = (unsigned)(dpos - dist);
 
   /* backref: */
@@ -374,6 +384,12 @@ infl_strm_blk(defl_stream_t          * __restrict stream,
     stream->ss.blk.copy_remaining = len;
 
   resume_backref:
+    if (OUT_FULL(len)) {
+      *dst_pos = dpos;
+      DONATE();
+      return UNZ_EFULL;
+    }
+
     /* output back-reference */
     if (dist == 1) {
       used = dst[dpos - 1];
@@ -387,6 +403,7 @@ infl_strm_blk(defl_stream_t          * __restrict stream,
       }
 #endif
       while (len >= 8) {
+        if (OUT_FULL(8u)) FULL_BLK();
         dst[dpos]   = used;
         dst[dpos+1] = used;
         dst[dpos+2] = used;
@@ -398,6 +415,7 @@ infl_strm_blk(defl_stream_t          * __restrict stream,
         len-=8;dpos+=8;
       }
       while (len >= 4) {
+        if (OUT_FULL(4u)) FULL_BLK();
         dst[dpos]   = used;
         dst[dpos+1] = used;
         dst[dpos+2] = used;
@@ -405,6 +423,7 @@ infl_strm_blk(defl_stream_t          * __restrict stream,
         len-=4;dpos+=4;
       }
       if (len >= 1) {
+        if (OUT_FULL(len)) FULL_BLK();
         dst[dpos] = used;
         switch (len - 1) {
           case 2: dst[dpos+2] = used; /* fall through */
@@ -417,12 +436,14 @@ infl_strm_blk(defl_stream_t          * __restrict stream,
 #if defined(__ARM_NEON) || defined(__ARM_NEON__)
       if (len >= 16 && dist >= 16) {
         do {
+          if (OUT_FULL(16u)) FULL_BLK();
           vst1q_u8(&dst[dpos], vld1q_u8(&dst[src]));
           len-=16;dpos+=16;src+=16;
         } while (len >= 16);
       }
 #endif
       while (len >= 8) {
+        if (OUT_FULL(8u)) FULL_BLK();
         dst[dpos]   = dst[src];
         dst[dpos+1] = dst[src+1];
         dst[dpos+2] = dst[src+2];
@@ -434,6 +455,7 @@ infl_strm_blk(defl_stream_t          * __restrict stream,
         len -= 8; dpos += 8; src += 8;
       }
       while (len >= 4) {
+        if (OUT_FULL(4u)) FULL_BLK();
         dst[dpos]   = dst[src];
         dst[dpos+1] = dst[src+1];
         dst[dpos+2] = dst[src+2];
@@ -441,6 +463,7 @@ infl_strm_blk(defl_stream_t          * __restrict stream,
         len-=4;dpos+=4;src+=4;
       }
       if (len >= 1) {
+        if (OUT_FULL(len)) FULL_BLK();
         dst[dpos] = dst[src];
         switch (len - 1) {
           case 2: dst[dpos+2] = dst[src+2]; /* fall through */
@@ -470,6 +493,9 @@ infl_strm_blk(defl_stream_t          * __restrict stream,
   DONATE();
   return UNZ_OK;
 }
+
+#undef FULL_BLK
+#undef OUT_FULL
 
 UNZ_EXPORT
 int
@@ -619,6 +645,7 @@ raw:
         {
           res = infl_strm_raw(stream);
           if (res == UNZ_UNFINISHED) return UNZ_UNFINISHED;
+          if (res == UNZ_EFULL)      return UNZ_EFULL;
           if (res < UNZ_OK)          goto   err;
           RESTORE();
         }
@@ -631,6 +658,7 @@ fixed:
         {
           res = infl_strm_blk(stream, &_tlitl_s, &_tdist_s);
           if (res == UNZ_UNFINISHED) return UNZ_UNFINISHED;
+          if (res == UNZ_EFULL)      return UNZ_EFULL;
           if (res < UNZ_OK)          goto   err;
         }
         RESTORE();
@@ -778,6 +806,7 @@ fixed:
         RESTORE();
 
         if (res == UNZ_UNFINISHED) return UNZ_UNFINISHED;
+        if (res == UNZ_EFULL)      return UNZ_EFULL;
         if (res < UNZ_OK)          goto err;
 
         /* success - reset ALL dynamic state for next block */

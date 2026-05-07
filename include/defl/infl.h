@@ -48,6 +48,22 @@ infl_reset(infl_stream_t * __restrict stream,
            int                        flags);
 
 /*!
+ * @brief replace the output buffer without resetting inflate state
+ *
+ * Use this after infl_stream() returns UNZ_EFULL and the caller has grown or
+ * remapped the destination while preserving already-produced bytes.
+ *
+ * @param[in,out] stream    deflate stream
+ * @param[in]     dst       new uncompressed data destination
+ * @param[in]     dstlen    new destination size in bytes
+ */
+UNZ_EXPORT
+int
+infl_resize_output(infl_stream_t * __restrict stream,
+                   void          * __restrict dst,
+                   uint32_t                   dstlen);
+
+/*!
  * @brief appends a chunk to unzip stream to uncompress, the chunks may be
  *        separated from each other but can be uncompressed together
  *

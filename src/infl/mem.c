@@ -310,6 +310,19 @@ infl_reset(infl_stream_t * __restrict stream,
 }
 
 UNZ_EXPORT
+int
+infl_resize_output(infl_stream_t * __restrict stream,
+                   void          * __restrict dst,
+                   uint32_t                   dstlen) {
+  if (!stream || !dst || dstlen < stream->dstpos)
+    return UNZ_ERR;
+
+  stream->dst    = (uint8_t *)dst;
+  stream->dstlen = dstlen;
+  return UNZ_OK;
+}
+
+UNZ_EXPORT
 uint32_t
 infl_output_pos(const infl_stream_t * __restrict stream) {
   return stream ? (uint32_t)stream->dstpos : 0u;
