@@ -145,4 +145,16 @@ UNZ_EXPORT
 uint32_t
 infl_output_pos(const infl_stream_t * __restrict stream);
 
+/*!
+ * @brief current number of compressed bytes consumed by an inflate stream
+ *
+ * This excludes full unread bytes that were prefetched into the bit buffer,
+ * but keeps the partially consumed final byte as part of the deflate stream.
+ *
+ * @param[in] stream  deflate stream
+ */
+UNZ_EXPORT
+uint32_t
+infl_input_pos(const infl_stream_t * __restrict stream);
+
 #endif /* infl_h */

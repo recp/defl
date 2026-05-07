@@ -295,6 +295,41 @@ infl_output_pos(const infl_stream_t * __restrict stream) {
 }
 
 UNZ_EXPORT
+uint32_t
+infl_input_pos(const infl_stream_t * __restrict stream) {
+  const unz_chunk_t *chunk;
+  size_t pos;
+  unsigned unread;
+
+  if (!stream || !stream->bs.chunk)
+    return 0u;
+
+  pos = 0;
+  for (chunk = stream->start; chunk && chunk != stream->bs.chunk; chunk = chunk->next)
+    pos += (size_t)(chunk->end - chunk->p);
+
+  if (chunk) {
+    const uint8_t *p = stream->bs.p;
+
+    if (p < chunk->p)
+      p = chunk->p;
+    else if (p > chunk->end)
+      p = chunk->end;
+    pos += (size_t)(p - chunk->p);
+  } else {
+    pos = stream->srclen;
+  }
+
+  unread = stream->bs.nbits + stream->bs.npbits;
+  if ((size_t)(unread >> 3) < pos)
+    pos -= (size_t)(unread >> 3);
+  else
+    pos = 0;
+
+  return pos > UINT32_MAX ? UINT32_MAX : (uint32_t)pos;
+}
+
+UNZ_EXPORT
 void
 infl_destroy(defl_stream_t * __restrict stream) {
   unz_chunk_t *chk, *tofree;
