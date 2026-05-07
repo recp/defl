@@ -289,6 +289,27 @@ infl_reset_pool(infl_stream_t * __restrict stream) {
 }
 
 UNZ_EXPORT
+void
+infl_reset(infl_stream_t * __restrict stream,
+           void          * __restrict dst,
+           uint32_t                   dstlen,
+           int                        flags) {
+  if (!stream)
+    return;
+
+  infl_reset_pool(stream);
+  stream->header = NULL;
+  stream->bitpos = 0;
+  stream->dst    = (uint8_t *)dst;
+  stream->dstlen = dstlen;
+  stream->dstpos = 0;
+  stream->flags  = flags;
+
+  memset(&stream->bs, 0, sizeof(stream->bs));
+  memset(&stream->ss, 0, sizeof(stream->ss));
+}
+
+UNZ_EXPORT
 uint32_t
 infl_output_pos(const infl_stream_t * __restrict stream) {
   return stream ? (uint32_t)stream->dstpos : 0u;

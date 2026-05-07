@@ -33,6 +33,21 @@ infl_stream_t*
 infl_init(void * __restrict dst, uint32_t dstlen, int flags);
 
 /*!
+ * @brief reset an inflate stream for reuse with a new destination
+ *
+ * @param[in,out] stream    deflate stream
+ * @param[in]     dst       uncompressed data destination
+ * @param[in]     dstlen    size of uncompressed data in bytes
+ * @param[in]     flags     pass 1 for zlib header
+ */
+UNZ_EXPORT
+void
+infl_reset(infl_stream_t * __restrict stream,
+           void          * __restrict dst,
+           uint32_t                   dstlen,
+           int                        flags);
+
+/*!
  * @brief appends a chunk to unzip stream to uncompress, the chunks may be
  *        separated from each other but can be uncompressed together
  *
