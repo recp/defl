@@ -115,13 +115,17 @@ get_pooled_chunk_struct(infl_stream_t * __restrict stream) {
 /* prefetch data for better performance */
 static inline void
 prefetch_data(const void *addr, size_t len) {
-  (void)addr;
-  (void)len;
-#if defined(__builtin_prefetch)
+#if defined(__GNUC__) || defined(__clang__)
   const char *p = (const char *)addr;
-  for (size_t i = 0; i < len; i += 64) {
-    __builtin_prefetch(p + i, 0, 1);
-  }
+#else
+  (void)addr;
+#endif
+  (void)len;
+#if defined(__GNUC__) || defined(__clang__)
+  __builtin_prefetch(p, 0, 1);
+  if (len >= 128) __builtin_prefetch(p + 64,  0, 1);
+  if (len >= 256) __builtin_prefetch(p + 192, 0, 1);
+  if (len >= 512) __builtin_prefetch(p + 448, 0, 1);
 #endif
 }
 
@@ -188,25 +192,22 @@ infl_include(infl_stream_t * __restrict stream,
   if (len >= 256) {
     prefetch_data(ptr, len);
   }
+
+  if (stream->current_appendable &&
+      stream->current_appendable->is_appendable &&
+      len <= stream->current_appendable->buffer_size - stream->current_appendable->used) {
+    fast_memcpy(stream->current_appendable->buffer + stream->current_appendable->used,
+                ptr,
+                len);
+    stream->current_appendable->used += len;
+    stream->current_appendable->end   = stream->current_appendable->buffer
+                                      + stream->current_appendable->used;
+    stream->srclen                   += len;
+    return;
+  }
   
   /* strategy: append chunks up to threshold, allocate large ones directly */
   if (len <= UNZ_CHUNK_APPEND_THRESHOLD) {
-    /* try to append to current appendable chunk */
-    if (stream->current_appendable && 
-        stream->current_appendable->is_appendable &&
-        (stream->current_appendable->used + len) <= stream->current_appendable->buffer_size) {
-      
-      /* append to existing chunk with fast copy */
-      fast_memcpy(stream->current_appendable->buffer 
-                  + stream->current_appendable->used, 
-                  ptr, 
-                  len);
-      stream->current_appendable->used += len;
-      stream->current_appendable->end   = stream->current_appendable->buffer + stream->current_appendable->used;
-      stream->srclen                   += len;
-      return;
-    }
-    
     /* need new chunk - check if we should flush current one first */
     if (stream->current_appendable && 
         stream->current_appendable->used > 0) {
@@ -228,7 +229,35 @@ infl_include(infl_stream_t * __restrict stream,
       goto fallback_alloc;
     }
   } else {
+    if (len <= UNZ_CHUNK_PAGE_SIZE && stream->start && stream->start == stream->end &&
+        !stream->current_appendable && stream->srclen <= UNZ_CHUNK_PAGE_SIZE - len &&
+        stream->start->is_pooled && stream->start->p && stream->start->end) {
+      unz_chunk_t *first;
+      size_t       first_len;
+
+      first     = stream->start;
+      first_len = (size_t)(first->end - first->p);
+      if (unlikely(first_len > UNZ_CHUNK_PAGE_SIZE - len))
+        goto direct_chunk;
+
+      chk       = get_pooled_chunk(stream);
+      if (chk) {
+        fast_memcpy(chk->buffer, first->p, first_len);
+        fast_memcpy(chk->buffer + first_len, ptr, len);
+        chk->used                  = first_len + len;
+        chk->p                     = chk->buffer;
+        chk->end                   = chk->buffer + chk->used;
+        chk->is_appendable         = chk->used < chk->buffer_size;
+        stream->start              = chk;
+        stream->end                = chk;
+        stream->current_appendable = chk->is_appendable ? chk : NULL;
+        stream->srclen            += len;
+        return;
+      }
+    }
+
     /* large chunk: try to use pooled chunk structure first */
+direct_chunk:
     chk = get_pooled_chunk_struct(stream);
     if (!chk) {
       /* structure pool exhausted, fall back to calloc */
@@ -288,6 +317,29 @@ infl_reset_pool(infl_stream_t * __restrict stream) {
   stream->srclen             = 0;
 }
 
+static inline void
+infl_reset_state(infl_stream_t * __restrict stream) {
+  memset(&stream->bs, 0, sizeof(stream->bs));
+  memset(&stream->ss.raw, 0, sizeof(stream->ss.raw));
+  memset(&stream->ss.blk, 0, sizeof(stream->ss.blk));
+
+  stream->ss.state = INFL_STATE_NONE;
+  stream->ss.bfinal = 0;
+  stream->ss.btype  = 0;
+  stream->ss.gothdr = false;
+
+  stream->ss.dyn.hlit         = 0;
+  stream->ss.dyn.hdist        = 0;
+  stream->ss.dyn.hclen        = 0;
+  stream->ss.dyn.n            = 0;
+  stream->ss.dyn.i            = 0;
+  stream->ss.dyn.repeat       = 0;
+  stream->ss.dyn.prev         = 0;
+  stream->ss.dyn.tlit_valid   = 0;
+  stream->ss.dyn.tdist_valid  = 0;
+  stream->ss.dyn.codelen_done = 0;
+}
+
 UNZ_EXPORT
 void
 infl_reset(infl_stream_t * __restrict stream,
@@ -305,8 +357,7 @@ infl_reset(infl_stream_t * __restrict stream,
   stream->dstpos = 0;
   stream->flags  = flags;
 
-  memset(&stream->bs, 0, sizeof(stream->bs));
-  memset(&stream->ss, 0, sizeof(stream->ss));
+  infl_reset_state(stream);
 }
 
 UNZ_EXPORT

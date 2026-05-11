@@ -330,6 +330,27 @@ infl_copy_match_word(uint8_t * __restrict dst,
 }
 
 UNZ_INLINE void
+infl_copy_match_small_overrun(uint8_t * __restrict dst,
+                              size_t  * __restrict dpos,
+                              unsigned             dist,
+                              unsigned             len) {
+  size_t pos, src, end;
+
+  pos = *dpos;
+  src = pos - dist;
+  end = pos + len;
+
+  /* dist < 8: overlapping word stores quickly propagate the repeated pattern. */
+  do {
+    infl_store64(dst + pos, infl_load64(dst + src));
+    pos += dist;
+    src += dist;
+  } while (pos < end);
+
+  *dpos = end;
+}
+
+UNZ_INLINE void
 infl_copy_match_overrun(uint8_t * __restrict dst,
                         size_t  * __restrict dpos,
                         unsigned             dist,
@@ -354,12 +375,12 @@ infl_copy_match_overrun(uint8_t * __restrict dst,
   *dpos = end;
 }
 
-#define INFL_FT_LIT_BITS    11u
+#define INFL_FT_LIT_BITS    10u
 #define INFL_FT_DIST_BITS   8u
 #define INFL_FT_LIT_MAIN    (1u << INFL_FT_LIT_BITS)
 #define INFL_FT_DIST_MAIN   (1u << INFL_FT_DIST_BITS)
-#define INFL_FT_LIT_CAP     4096u
-#define INFL_FT_DIST_CAP    1024u
+#define INFL_FT_LIT_CAP     2048u
+#define INFL_FT_DIST_CAP    512u
 
 #define INFL_FT_TOTAL(E)    ((unsigned)((E) & 31u))
 #define INFL_FT_CODELEN(E)  ((unsigned)(((E) >> 5) & 15u))
@@ -383,15 +404,13 @@ typedef struct infl_ft_bits_t {
 } infl_ft_bits_t;
 
 typedef struct infl_ft_table_t {
-  uint32_t table[INFL_FT_LIT_CAP];
+  UNZ_ALIGN(64) uint32_t table[INFL_FT_LIT_CAP];
   uint16_t used;
-  uint8_t  bits;
 } infl_ft_table_t;
 
 typedef struct infl_ft_dist_table_t {
-  uint32_t table[INFL_FT_DIST_CAP];
+  UNZ_ALIGN(64) uint32_t table[INFL_FT_DIST_CAP];
   uint16_t used;
-  uint8_t  bits;
 } infl_ft_dist_table_t;
 
 UNZ_INLINE uint16_t
@@ -701,21 +720,18 @@ infl_ft_block(infl_ft_bits_t              * __restrict br,
     if (unlikely(!entry))
       return UNZ_ERR;
 
-    saved    = br->bits;
-    total    = INFL_FT_TOTAL(entry);
-    code_len = INFL_FT_CODELEN(entry);
-    base     = INFL_FT_BASE(entry);
+    total = INFL_FT_TOTAL(entry);
 
     if (unlikely(br->nbits < total)) {
       infl_ft_refill(br, total);
       if (unlikely(br->nbits < total))
         return UNZ_ERR;
-      saved = br->bits;
     }
 
-    infl_ft_consume(br, total);
-
     if (likely(entry & INFL_FT_LITERAL)) {
+      base = INFL_FT_BASE(entry);
+      infl_ft_consume(br, total);
+
       if (unlikely(pos >= dst_cap))
         return UNZ_EFULL;
       dst[pos++] = (uint8_t)base;
@@ -747,9 +763,15 @@ next_symbol_ready:
       continue;
     }
 
-    if (unlikely(entry & INFL_FT_END))
+    if (unlikely(entry & INFL_FT_END)) {
+      infl_ft_consume(br, total);
       break;
+    }
 
+    saved    = br->bits;
+    code_len = INFL_FT_CODELEN(entry);
+    base     = INFL_FT_BASE(entry);
+    infl_ft_consume(br, total);
     len = base + (unsigned)((saved & (((bitstream_t)1 << total) - 1u)) >> code_len);
 
     if (unlikely(br->nbits < 15)) {
@@ -824,6 +846,8 @@ next_symbol_ready:
         }
         pos += len;
       }
+    } else if (likely(len + 7 <= out_rem)) {
+      infl_copy_match_small_overrun(dst, &pos, dist, len);
     } else {
       src = pos - dist;
       while (len >= 8) {
@@ -956,8 +980,6 @@ infl_ft_dynamic(infl_ft_bits_t         * __restrict br,
                               INFL_FT_DIST_CAP, false)))
     return UNZ_ERR;
 
-  tlit->bits  = INFL_FT_LIT_BITS;
-  tdist->bits = INFL_FT_DIST_BITS;
   return UNZ_OK;
 }
 
@@ -1010,8 +1032,6 @@ infl_ft_full(defl_stream_t * __restrict stream) {
                                 32, INFL_FT_DIST_BITS, INFL_FT_DIST_CAP,
                                 false)))
       return UNZ_ERR;
-    fixed_lit.bits  = INFL_FT_LIT_BITS;
-    fixed_dist.bits = INFL_FT_DIST_BITS;
     fixed_init = true;
   }
 
@@ -1061,8 +1081,6 @@ infl_ft_full(defl_stream_t * __restrict stream) {
   stream->bs.end    = br.end;
   stream->bs.bits   = br.bits;
   stream->bs.nbits  = br.nbits;
-  stream->bs.pbits  = 0;
-  stream->bs.npbits = 0;
   if (zlib)
     stream->header = stream;
 
@@ -1194,10 +1212,11 @@ infl_ft_full(defl_stream_t * __restrict stream) {
 static UNZ_HOT
 UnzResult
 infl_block(defl_stream_t          * __restrict stream,
+           unz__bitstate_t        * __restrict state,
+           size_t                 * __restrict dst_pos,
            const huff_table_ext_t * __restrict tlit,
            const huff_table_ext_t * __restrict tdist) {
   uint8_t * __restrict dst;
-  size_t  * __restrict dst_pos;
   unz__bitstate_t bs;
   size_t          dst_cap, dpos, src, out_rem;
   unsigned        len,  dist;
@@ -1206,10 +1225,9 @@ infl_block(defl_stream_t          * __restrict stream,
 
   dst     = stream->dst;
   dst_cap = stream->dstlen;
-  dst_pos = &stream->dstpos;
   dpos    = *dst_pos;
 
-  RESTORE();
+  bs = *state;
 
   while (true) {
     /* decode literal/length symbol */
@@ -1304,6 +1322,8 @@ infl_block(defl_stream_t          * __restrict stream,
         }
         dpos += len;
       }
+    } else if (likely(len + 7 <= out_rem)) {
+      infl_copy_match_small_overrun(dst, &dpos, dist, len);
     } else {
       src = dpos - dist;
 #if defined(__ARM_NEON) || defined(__ARM_NEON__)
@@ -1345,15 +1365,16 @@ infl_block(defl_stream_t          * __restrict stream,
   }
 
   *dst_pos = dpos;
-
-  DONATE();
+  *state   = bs;
 
   return UNZ_OK;
 }
 
 static UNZ_HOT
 UnzResult
-infl_raw(defl_stream_t * __restrict stream) {
+infl_raw(defl_stream_t   * __restrict stream,
+         unz__bitstate_t * __restrict state,
+         size_t          * __restrict dst_pos) {
   uint8_t        *dst;
   const uint8_t  *p;
   unz__bitstate_t bs;
@@ -1361,11 +1382,11 @@ infl_raw(defl_stream_t * __restrict stream) {
   uint32_t        header, val;
   uint16_t        len, nlen;
 
-  dpos = (unsigned)stream->dstpos;
+  dpos = (unsigned)*dst_pos;
   dlen = stream->dstlen;
   (void)simdlen; /* suppress unused warn */
 
-  RESTORE();
+  bs = *state;
 
   /* align to byte boundary */
   if (bs.nbits & 7) {
@@ -1498,9 +1519,8 @@ infl_raw(defl_stream_t * __restrict stream) {
     }
   }
 
-  stream->dstpos = dpos + len;
-
-  DONATE();
+  *dst_pos = dpos + len;
+  *state   = bs;
 
   return UNZ_OK;
 }
@@ -1512,14 +1532,30 @@ infl(defl_stream_t * __restrict stream) {
   static bool             _init=false;
 
   unz__bitstate_t bs;
+  size_t          dpos = stream->dstpos;
   uint_fast8_t    btype, bfinal = 0;
   UnzResult       ft_res, stored_res;
+  bool            try_stored;
 
-  stored_res = infl_stored_direct(stream);
+  try_stored = true;
+  if (stream->start && stream->start == stream->end &&
+      stream->dstpos == 0 && !stream->bs.chunk && !stream->header &&
+      stream->start->p && stream->start->p < stream->start->end) {
+    const uint8_t *sp = stream->start->p;
+    const uint8_t *se = stream->start->end;
+
+    if (stream->flags == 0) {
+      try_stored = (((sp[0] >> 1) & 3u) == 0);
+    } else if (stream->flags == INFL_ZLIB && (size_t)(se - sp) >= 3) {
+      try_stored = (((sp[2] >> 1) & 3u) == 0);
+    }
+  }
+
+  stored_res = try_stored ? infl_stored_direct(stream) : UNZ_NOOP;
   if (stored_res != UNZ_NOOP && stored_res != UNZ_UNFINISHED)
     return stored_res;
 
-  if (stored_res == UNZ_NOOP && stream->srclen <= (stream->dstlen >> 2)) {
+  if (stored_res == UNZ_NOOP) {
     ft_res = infl_ft_full(stream);
     if (ft_res != UNZ_NOOP)
       return ft_res;
@@ -1555,6 +1591,7 @@ infl(defl_stream_t * __restrict stream) {
       stream->bs.end = stream->bs.chunk->end;
     }
   }
+  dpos = stream->dstpos;
   RESTORE();
 
   while (!bfinal && bs.chunk) {
@@ -1565,14 +1602,12 @@ infl(defl_stream_t * __restrict stream) {
 
     switch (btype) {
       case 0:
-        DONATE();
-        if (infl_raw(stream) < UNZ_OK) goto err;
-        RESTORE();
+        if (infl_raw(stream, &bs, &dpos) < UNZ_OK) goto err;
+        if (bfinal) goto ok;
         break;
       case 1:
-        DONATE();
-        if (infl_block(stream, &_tlitl, &_tdist) < UNZ_OK) goto err;
-        RESTORE();
+        if (infl_block(stream, &bs, &dpos, &_tlitl, &_tdist) < UNZ_OK) goto err;
+        if (bfinal) goto ok;
         break;
       case 2: {
         union {
@@ -1641,9 +1676,8 @@ infl(defl_stream_t * __restrict stream) {
             !huff_init_lsb_ext(dyn_tdist,lens.lens+hlit,NULL,dvals,hdist))
           goto err;
 
-        DONATE();
-        if (infl_block(stream, dyn_tlen, dyn_tdist) < UNZ_OK) goto err;
-        RESTORE();
+        if (infl_block(stream, &bs, &dpos, dyn_tlen, dyn_tdist) < UNZ_OK) goto err;
+        if (bfinal) goto ok;
       } break;
       default:
         goto err;
@@ -1652,6 +1686,7 @@ infl(defl_stream_t * __restrict stream) {
 
   /* stream->it = bs.chunk; */
 ok:
+  stream->dstpos = dpos;
   DONATE();
   return UNZ_OK;
 noop:
@@ -1666,6 +1701,9 @@ infl_init(void * __restrict dst, uint32_t dstlen, int flags) {
   infl_stream_t *st;
 
   st          = calloc(1, sizeof(*st));
+  if (!st)
+    return NULL;
+
   st->dst     = (uint8_t *)dst;
   st->dstlen  = dstlen;
 

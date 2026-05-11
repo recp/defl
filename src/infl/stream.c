@@ -66,7 +66,8 @@
 
 static UNZ_HOT
 UnzResult
-infl_strm_raw(defl_stream_t * __restrict stream) {
+infl_strm_raw(defl_stream_t   * __restrict stream,
+              unz__bitstate_t * __restrict bitstate) {
   uint8_t        *dst;
   const uint8_t  *p;
   unz__bitstate_t bs;
@@ -76,7 +77,7 @@ infl_strm_raw(defl_stream_t * __restrict stream) {
 
   (void)simdlen; /* suppress unused warn */
 
-  RESTORE();
+  bs = *bitstate;
 
   dpos   = (unsigned)stream->dstpos;
   dlen   = stream->dstlen;
@@ -249,13 +250,14 @@ infl_strm_raw(defl_stream_t * __restrict stream) {
   stream->ss.raw.len         = 0;
   stream->ss.raw.remlen      = 0;
 
-  DONATE();
+  *bitstate = bs;
   return UNZ_OK;
 }
 
 static UNZ_HOT
 UnzResult
 infl_strm_blk(defl_stream_t          * __restrict stream,
+              unz__bitstate_t        * __restrict bitstate,
               const huff_table_ext_t * __restrict tlit,
               const huff_table_ext_t * __restrict tdist) {
   uint8_t * __restrict dst;
@@ -273,7 +275,7 @@ infl_strm_blk(defl_stream_t          * __restrict stream,
   dst_pos = &stream->dstpos;
   dpos    = *dst_pos;
 
-  RESTORE();
+  bs = *bitstate;
 
   /* restore block state if resuming */
   state          = stream->ss.blk.state;
@@ -490,7 +492,7 @@ infl_strm_blk(defl_stream_t          * __restrict stream,
   stream->ss.blk.src            = 0;
   stream->ss.blk.copy_remaining = 0;
 
-  DONATE();
+  *bitstate = bs;
   return UNZ_OK;
 }
 
@@ -641,27 +643,23 @@ blk_head:
       case 0:
 raw:
         stream->ss.state = INFL_STATE_RAW;
-        DONATE();
         {
-          res = infl_strm_raw(stream);
+          res = infl_strm_raw(stream, &bs);
           if (res == UNZ_UNFINISHED) return UNZ_UNFINISHED;
           if (res == UNZ_EFULL)      return UNZ_EFULL;
           if (res < UNZ_OK)          goto   err;
-          RESTORE();
         }
         break;
         
       case 1:
 fixed:
         stream->ss.state = INFL_STATE_FIXED;
-        DONATE();
         {
-          res = infl_strm_blk(stream, &_tlitl_s, &_tdist_s);
+          res = infl_strm_blk(stream, &bs, &_tlitl_s, &_tdist_s);
           if (res == UNZ_UNFINISHED) return UNZ_UNFINISHED;
           if (res == UNZ_EFULL)      return UNZ_EFULL;
           if (res < UNZ_OK)          goto   err;
         }
-        RESTORE();
         break;
       case 2: {
         huff_fast_entry_t tcodelen[HUFF_FAST_TABLE_SIZE] = {0};
@@ -710,9 +708,8 @@ fixed:
         stream->ss.dyn.repeat = 0;
         stream->ss.dyn.prev   = 0;
 
-        /* clear arrays */
-        memset(stream->ss.dyn.codelens,0,sizeof(stream->ss.dyn.codelens));
-        memset(stream->ss.dyn.lens,    0,sizeof(stream->ss.dyn.lens));
+        memset(stream->ss.dyn.codelens, 0, sizeof(stream->ss.dyn.codelens));
+        memset(stream->ss.dyn.lens,     0, (size_t)n);
         i = 0;
 
       dyn_hdr_resume:
@@ -801,16 +798,16 @@ fixed:
         stream->ss.state = INFL_STATE_DYNAMIC_BLOCK;
 
         /* decode the compressed block */
-        DONATE();
-        res = infl_strm_blk(stream, &stream->ss.dyn.tlit, &stream->ss.dyn.tdist);
-        RESTORE();
+        res = infl_strm_blk(stream, &bs, &stream->ss.dyn.tlit, &stream->ss.dyn.tdist);
 
         if (res == UNZ_UNFINISHED) return UNZ_UNFINISHED;
         if (res == UNZ_EFULL)      return UNZ_EFULL;
         if (res < UNZ_OK)          goto err;
 
-        /* success - reset ALL dynamic state for next block */
-        memset(&stream->ss.dyn, 0, sizeof(stream->ss.dyn));
+        stream->ss.dyn.n      = 0;
+        stream->ss.dyn.i      = 0;
+        stream->ss.dyn.repeat = 0;
+        stream->ss.dyn.prev   = 0;
       } break;
 
       default:
