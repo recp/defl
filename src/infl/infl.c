@@ -29,6 +29,244 @@ infl_store64(uint8_t * __restrict p, uint64_t v) {
 }
 
 UNZ_INLINE void
+infl_copy_stored_direct(uint8_t       * __restrict dst,
+                        const uint8_t * __restrict src,
+                        size_t                     len) {
+  if (len)
+    memcpy(dst, src, len);
+}
+
+typedef struct infl_stored_bits_t {
+  const uint8_t *p;
+  const uint8_t *end;
+  bitstream_t    bits;
+  unsigned       nbits;
+} infl_stored_bits_t;
+
+UNZ_INLINE bitstream_t
+infl_load_partial_le(const uint8_t * __restrict p, size_t n) {
+  bitstream_t v;
+
+  if (likely(n == sizeof(uint64_t)))
+    return infl_load64(p);
+
+  v = 0;
+  switch (n) {
+    case 7: v |= (bitstream_t)p[6] << 48; /* fall through */
+    case 6: v |= (bitstream_t)p[5] << 40; /* fall through */
+    case 5: v |= (bitstream_t)p[4] << 32; /* fall through */
+    case 4: v |= (bitstream_t)p[3] << 24; /* fall through */
+    case 3: v |= (bitstream_t)p[2] << 16; /* fall through */
+    case 2: v |= (bitstream_t)p[1] << 8;  /* fall through */
+    case 1: v |= (bitstream_t)p[0];       /* fall through */
+    default: break;
+  }
+  return v;
+}
+
+UNZ_INLINE void
+infl_stored_refill(infl_stored_bits_t * __restrict br, unsigned need) {
+  while (br->nbits < need && br->p < br->end) {
+    size_t n, avail;
+
+    n     = (64u - br->nbits) >> 3;
+    avail = (size_t)(br->end - br->p);
+    if (n > avail)
+      n = avail;
+    if (!n)
+      break;
+
+    br->bits  |= infl_load_partial_le(br->p, n) << br->nbits;
+    br->p     += n;
+    br->nbits += (unsigned)(n << 3);
+  }
+}
+
+UNZ_INLINE void
+infl_stored_consume(infl_stored_bits_t * __restrict br, unsigned n) {
+  if (n == 64)
+    br->bits = 0;
+  else
+    br->bits >>= n;
+  br->nbits -= n;
+}
+
+static UnzResult
+infl_stored_block(infl_stored_bits_t * __restrict br,
+                  uint8_t            * __restrict dst,
+                  size_t                          dst_cap,
+                  size_t             * __restrict dpos,
+                  uint_fast8_t       * __restrict bfinal) {
+  uint32_t header;
+  uint16_t len, nlen;
+  unsigned nbytes, shift;
+  size_t   rem;
+
+  if (likely(br->nbits == 0 && br->p < br->end)) {
+    const uint8_t *p;
+
+    p       = br->p;
+    *bfinal = (uint_fast8_t)(p[0] & 1u);
+    if (unlikely(((p[0] >> 1) & 3u) != 0))
+      return UNZ_NOOP;
+
+    if (unlikely((size_t)(br->end - p) < 5))
+      return UNZ_ERR;
+
+    len  = (uint16_t)((uint16_t)p[1] | ((uint16_t)p[2] << 8));
+    nlen = (uint16_t)((uint16_t)p[3] | ((uint16_t)p[4] << 8));
+    if (unlikely((uint16_t)(len ^ (uint16_t)~nlen) || len > dst_cap - *dpos))
+      return UNZ_ERR;
+
+    p += 5;
+    if (unlikely((size_t)(br->end - p) < len))
+      return UNZ_ERR;
+
+    infl_copy_stored_direct(dst + *dpos, p, len);
+
+    br->p = p + len;
+    *dpos += len;
+
+    return UNZ_OK;
+  }
+
+  infl_stored_refill(br, 3);
+  if (unlikely(br->nbits < 3))
+    return UNZ_ERR;
+
+  *bfinal = (uint_fast8_t)(br->bits & 1u);
+  if (unlikely(((br->bits >> 1) & 3u) != 0))
+    return UNZ_NOOP;
+  infl_stored_consume(br, 3);
+
+  shift = br->nbits & 7u;
+  if (shift)
+    infl_stored_consume(br, shift);
+
+  infl_stored_refill(br, 32);
+  if (unlikely(br->nbits < 32))
+    return UNZ_ERR;
+
+  header = (uint32_t)br->bits;
+  infl_stored_consume(br, 32);
+  len  = (uint16_t)header;
+  nlen = (uint16_t)(header >> 16);
+  if (unlikely((uint16_t)(len ^ (uint16_t)~nlen) || len > dst_cap - *dpos))
+    return UNZ_ERR;
+
+  rem    = len;
+  nbytes = br->nbits >> 3;
+  if (nbytes > rem)
+    nbytes = (unsigned)rem;
+
+  if (nbytes) {
+    switch (nbytes) {
+      case 7: dst[*dpos + 6] = (uint8_t)(br->bits >> 48); /* fall through */
+      case 6: dst[*dpos + 5] = (uint8_t)(br->bits >> 40); /* fall through */
+      case 5: dst[*dpos + 4] = (uint8_t)(br->bits >> 32); /* fall through */
+      case 4: dst[*dpos + 3] = (uint8_t)(br->bits >> 24); /* fall through */
+      case 3: dst[*dpos + 2] = (uint8_t)(br->bits >> 16); /* fall through */
+      case 2: dst[*dpos + 1] = (uint8_t)(br->bits >> 8);  /* fall through */
+      case 1: dst[*dpos]     = (uint8_t)br->bits;         /* fall through */
+      default: break;
+    }
+    infl_stored_consume(br, nbytes << 3);
+    *dpos += nbytes;
+    rem   -= nbytes;
+  }
+
+  if (unlikely((size_t)(br->end - br->p) < rem))
+    return UNZ_ERR;
+
+  if (rem)
+    memcpy(dst + *dpos, br->p, rem);
+  br->p += rem;
+  *dpos += rem;
+
+  return UNZ_OK;
+}
+
+UNZ_INLINE void
+infl_stored_donate(defl_stream_t      * __restrict stream,
+                   infl_stored_bits_t * __restrict br,
+                   size_t                          dpos,
+                   bool                            zlib) {
+  stream->dstpos    = dpos;
+  stream->bs.chunk  = stream->start;
+  stream->bs.p      = br->p;
+  stream->bs.end    = br->end;
+  stream->bs.bits   = br->bits;
+  stream->bs.nbits  = (int)br->nbits;
+  stream->bs.pbits  = 0;
+  stream->bs.npbits = 0;
+  if (zlib)
+    stream->header = stream;
+}
+
+static UnzResult
+infl_stored_direct(defl_stream_t * __restrict stream) {
+  infl_stored_bits_t br;
+  const uint8_t     *p, *end;
+  uint8_t           *dst;
+  size_t             dpos, dst_cap;
+  uint_fast8_t       bfinal;
+  bool               zlib;
+
+  if (!stream->start || stream->start != stream->end ||
+      stream->dstpos != 0 || stream->bs.chunk || stream->header)
+    return UNZ_NOOP;
+
+  p   = stream->start->p;
+  end = stream->start->end;
+  if (!p || p >= end)
+    return UNZ_NOOP;
+
+  zlib = stream->flags == INFL_ZLIB;
+  if (zlib) {
+    uint8_t cmf, flg;
+
+    if (unlikely((size_t)(end - p) < 2))
+      return UNZ_ERR;
+    if ((size_t)(end - p) < 3 || (((p[2] >> 1) & 3u) != 0))
+      return UNZ_NOOP;
+
+    cmf = p[0];
+    flg = p[1];
+    if (unlikely((cmf & 0x0f) != 8 || (cmf >> 4) > 7 ||
+                 ((((uint16_t)cmf << 8) + flg) % 31) != 0 ||
+                 (flg & 0x20)))
+      return UNZ_ERR;
+    p += 2;
+  } else if (stream->flags != 0) {
+    return UNZ_NOOP;
+  } else if (((p[0] >> 1) & 3u) != 0) {
+    return UNZ_NOOP;
+  }
+
+  dst     = stream->dst;
+  dst_cap = stream->dstlen;
+  dpos    = 0;
+  br.p     = p;
+  br.end   = end;
+  br.bits  = 0;
+  br.nbits = 0;
+
+  do {
+    UnzResult res = infl_stored_block(&br, dst, dst_cap, &dpos, &bfinal);
+    if (res == UNZ_NOOP) {
+      infl_stored_donate(stream, &br, dpos, zlib);
+      return UNZ_UNFINISHED;
+    } else if (res != UNZ_OK) {
+      return res;
+    }
+  } while (!bfinal);
+
+  infl_stored_donate(stream, &br, dpos, zlib);
+
+  return UNZ_OK;
+}
+
+UNZ_INLINE void
 infl_copy_rle(uint8_t * __restrict dst, size_t * __restrict dpos, unsigned len) {
   uint8_t  byte;
   uint64_t word;
@@ -42,6 +280,29 @@ infl_copy_rle(uint8_t * __restrict dst, size_t * __restrict dpos, unsigned len) 
   do {
     infl_store64(dst + pos, word);
     pos += 8;
+  } while (pos < end);
+
+  *dpos = end;
+}
+
+UNZ_INLINE void
+infl_copy_rle_overrun(uint8_t * __restrict dst, size_t * __restrict dpos, unsigned len) {
+  uint8_t  byte;
+  uint64_t word;
+  size_t   pos, end;
+
+  pos  = *dpos;
+  byte = dst[pos - 1];
+  word = UINT64_C(0x0101010101010101) * byte;
+  end  = pos + len;
+
+  do {
+    infl_store64(dst + pos,      word);
+    infl_store64(dst + pos + 8,  word);
+    infl_store64(dst + pos + 16, word);
+    infl_store64(dst + pos + 24, word);
+    infl_store64(dst + pos + 32, word);
+    pos += 40;
   } while (pos < end);
 
   *dpos = end;
@@ -250,7 +511,7 @@ infl_block(defl_stream_t          * __restrict stream,
         return UNZ_EFULL;
       dst[dpos++] = (uint8_t)lsym;
 
-      for (unsigned litrun = 2; litrun && likely(dpos < dst_cap); litrun--) {
+      for (unsigned litrun = 4; litrun && likely(dpos < dst_cap); litrun--) {
         const huff_fast_entry_ext_t *fe;
 
         if (unlikely(bs.nbits < HUFF_FAST_TABLE_BITS))
@@ -286,6 +547,8 @@ infl_block(defl_stream_t          * __restrict stream,
       infl_copy_match_overrun(dst, &dpos, dist, len);
     } else if (dist >= 8 && likely(len + 7 <= out_rem)) {
       infl_copy_match_word(dst, &dpos, dist, len);
+    } else if (dist == 1 && len >= 32 && likely(len + 39 <= out_rem)) {
+      infl_copy_rle_overrun(dst, &dpos, len);
     } else if (dist == 1 && likely(len + 7 <= out_rem)) {
       infl_copy_rle(dst, &dpos, len);
     } else if (dist == 1) {
@@ -535,13 +798,20 @@ infl(defl_stream_t * __restrict stream) {
 
   unz__bitstate_t bs;
   uint_fast8_t    btype, bfinal = 0;
+  UnzResult       stored_res;
 
-  if (!stream->bs.chunk && !(stream->bs.chunk = stream->start))
-    goto noop;
+  stored_res = infl_stored_direct(stream);
+  if (stored_res != UNZ_NOOP && stored_res != UNZ_UNFINISHED)
+    return stored_res;
 
-  if (!stream->start->p || stream->start->p == stream->start->end) {
-    RESTORE();
-    goto ok;
+  if (stored_res == UNZ_NOOP) {
+    if (!stream->bs.chunk && !(stream->bs.chunk = stream->start))
+      goto noop;
+
+    if (!stream->start->p || stream->start->p == stream->start->end) {
+      RESTORE();
+      goto ok;
+    }
   }
 
   /* initilize static tables */
@@ -553,14 +823,16 @@ infl(defl_stream_t * __restrict stream) {
     _init = true;
   }
 
-  stream->bs.p   = stream->start->p;
-  stream->bs.end = stream->start->end;
-  if (stream->flags == INFL_ZLIB && unlikely(!stream->header)) {
-    if (zlib_header(stream, &stream->bs.chunk, true) != UNZ_OK)
-      goto err;
-    stream->header = stream;
-    stream->bs.p   = stream->bs.chunk->p;
-    stream->bs.end = stream->bs.chunk->end;
+  if (stored_res == UNZ_NOOP) {
+    stream->bs.p   = stream->start->p;
+    stream->bs.end = stream->start->end;
+    if (stream->flags == INFL_ZLIB && unlikely(!stream->header)) {
+      if (zlib_header(stream, &stream->bs.chunk, true) != UNZ_OK)
+        goto err;
+      stream->header = stream;
+      stream->bs.p   = stream->bs.chunk->p;
+      stream->bs.end = stream->bs.chunk->end;
+    }
   }
   RESTORE();
 
@@ -587,9 +859,12 @@ infl(defl_stream_t * __restrict stream) {
           uint_fast8_t lens[MAX_LITLEN_CODES + MAX_DIST_CODES];
         } lens={0};
         huff_fast_entry_t tcodelen[HUFF_FAST_TABLE_SIZE];
-        huff_table_ext_t  dyn_tlen, dyn_tdist;
+        huff_table_ext_t  *dyn_tlen, *dyn_tdist;
         huff_fast_entry_t fe;
         int               i, n, hclen, hlit, hdist, repeat, prev;
+
+        dyn_tlen  = &stream->ss.dyn.tlit;
+        dyn_tdist = &stream->ss.dyn.tdist;
 
         REFILL(14);
         hlit  = (bs.bits & 0x1F) + 257;
@@ -641,12 +916,12 @@ infl(defl_stream_t * __restrict stream) {
           }
         }
 
-        if (!huff_init_lsb_extof(&dyn_tlen,lens.lens,NULL,lvals,257,hlit) ||
-            !huff_init_lsb_ext(&dyn_tdist,lens.lens+hlit,NULL,dvals,hdist))
+        if (!huff_init_lsb_extof(dyn_tlen,lens.lens,NULL,lvals,257,hlit) ||
+            !huff_init_lsb_ext(dyn_tdist,lens.lens+hlit,NULL,dvals,hdist))
           goto err;
 
         DONATE();
-        if (infl_block(stream, &dyn_tlen, &dyn_tdist) < UNZ_OK) goto err;
+        if (infl_block(stream, dyn_tlen, dyn_tdist) < UNZ_OK) goto err;
         RESTORE();
       } break;
       default:

@@ -627,6 +627,10 @@ test_regression_cases(void) {
   const uint8_t regression1[] = {
     0x01, 0x01, 0x00, 0xFE, 0xFF, 'A'  /* simple uncompressed 'A' */
   };
+  const uint8_t stored_then_fixed[] = {
+    0x00, 0x03, 0x00, 0xFC, 0xFF, 'a', 'b', 'c',
+    0x4B, 0x49, 0x4D, 0x03, 0x00
+  };
 
   start_time = get_time();
   memset(err_msg, 0, sizeof(err_msg));
@@ -652,6 +656,32 @@ test_regression_cases(void) {
   elapsed = get_time() - start_time;
   g_results.total_time += elapsed;
   print_test_result("regression_case_1", passed, elapsed,
+                    passed ? NULL : err_msg, passed ? details : NULL);
+
+  start_time = get_time();
+  memset(err_msg, 0, sizeof(err_msg));
+  memset(details, 0, sizeof(details));
+  memset(output,  0, sizeof(output));
+
+  ret = infl_buf(stored_then_fixed, sizeof(stored_then_fixed), output, sizeof(output), 0);
+  passed = (ret == UNZ_OK && memcmp(output, "abcdef", 6) == 0);
+  if (!passed) {
+    if (ret != UNZ_OK) {
+      snprintf(err_msg, sizeof(err_msg), "stored+fixed decompression error %d", ret);
+    } else {
+      snprintf(err_msg, sizeof(err_msg), "stored+fixed data mismatch");
+    }
+  } else {
+    snprintf(details, sizeof(details), "stored prefix fallback");
+  }
+
+  if (passed) { g_results.passed++; }
+  else        { g_results.failed++; }
+  g_results.total++;
+
+  elapsed = get_time() - start_time;
+  g_results.total_time += elapsed;
+  print_test_result("stored_prefix_then_fixed", passed, elapsed,
                     passed ? NULL : err_msg, passed ? details : NULL);
 }
 
