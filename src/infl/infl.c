@@ -354,6 +354,721 @@ infl_copy_match_overrun(uint8_t * __restrict dst,
   *dpos = end;
 }
 
+#define INFL_FT_LIT_BITS    11u
+#define INFL_FT_DIST_BITS   8u
+#define INFL_FT_LIT_MAIN    (1u << INFL_FT_LIT_BITS)
+#define INFL_FT_DIST_MAIN   (1u << INFL_FT_DIST_BITS)
+#define INFL_FT_LIT_CAP     4096u
+#define INFL_FT_DIST_CAP    1024u
+
+#define INFL_FT_TOTAL(E)    ((unsigned)((E) & 31u))
+#define INFL_FT_CODELEN(E)  ((unsigned)(((E) >> 5) & 15u))
+#define INFL_FT_XBITS(E)    ((unsigned)(((E) >> 9) & 15u))
+#define INFL_FT_LITERAL     (1u << 13)
+#define INFL_FT_END         (1u << 14)
+#define INFL_FT_SUBTABLE    (1u << 15)
+#define INFL_FT_BASE(E)     ((unsigned)((E) >> 16))
+#define INFL_FT_ENTRY(BASE, XBITS, CODELEN, FLAGS) \
+  (((uint32_t)(BASE) << 16) | (uint32_t)(FLAGS) | ((uint32_t)(XBITS) << 9) | \
+   ((uint32_t)(CODELEN) << 5) | (uint32_t)((CODELEN) + (XBITS)))
+#define INFL_FT_SUBENTRY(BASE, SUBBITS, MAINBITS) \
+  (((uint32_t)(BASE) << 16) | INFL_FT_SUBTABLE | ((uint32_t)(SUBBITS) << 5) | \
+   (uint32_t)(MAINBITS))
+
+typedef struct infl_ft_bits_t {
+  const uint8_t *p;
+  const uint8_t *end;
+  bitstream_t    bits;
+  unsigned       nbits;
+} infl_ft_bits_t;
+
+typedef struct infl_ft_table_t {
+  uint32_t table[INFL_FT_LIT_CAP];
+  uint16_t used;
+  uint8_t  bits;
+} infl_ft_table_t;
+
+typedef struct infl_ft_dist_table_t {
+  uint32_t table[INFL_FT_DIST_CAP];
+  uint16_t used;
+  uint8_t  bits;
+} infl_ft_dist_table_t;
+
+UNZ_INLINE uint16_t
+infl_ft_rev16(uint16_t v, unsigned len) {
+  v = (uint16_t)(((v & 0x5555u) << 1) | ((v >> 1) & 0x5555u));
+  v = (uint16_t)(((v & 0x3333u) << 2) | ((v >> 2) & 0x3333u));
+  v = (uint16_t)(((v & 0x0f0fu) << 4) | ((v >> 4) & 0x0f0fu));
+  v = (uint16_t)((v << 8) | (v >> 8));
+  return (uint16_t)(v >> (16u - len));
+}
+
+UNZ_INLINE uint32_t
+infl_ft_lit_entry(unsigned sym, unsigned len) {
+  if (sym < 256)
+    return INFL_FT_ENTRY(sym, 0, len, INFL_FT_LITERAL);
+
+  if (sym == 256)
+    return INFL_FT_ENTRY(0, 0, len, INFL_FT_END);
+
+  if (sym <= 285) {
+    huff_ext_t ext = lvals[sym - 257];
+    return INFL_FT_ENTRY(ext.base, ext.bits, len, 0);
+  }
+
+  return 0;
+}
+
+UNZ_INLINE uint32_t
+infl_ft_dist_entry(unsigned sym, unsigned len) {
+  huff_ext_t ext;
+
+  if (unlikely(sym > 29))
+    return 0;
+
+  ext = dvals[sym];
+  return INFL_FT_ENTRY(ext.base, ext.bits, len, 0);
+}
+
+static bool
+infl_ft_build(uint32_t       * __restrict table,
+              uint16_t      * __restrict used_out,
+              const uint8_t * __restrict lens,
+              uint16_t                   nsyms,
+              unsigned                   tablebits,
+              unsigned                   cap,
+              bool                       litlen) {
+  uint_fast16_t count[HUFF_MAX_CODE_LENGTH + 1] = {0};
+  uint_fast16_t code[HUFF_MAX_CODE_LENGTH + 1];
+  uint_fast16_t next_code[HUFF_MAX_CODE_LENGTH + 1];
+  uint16_t      subbase[1u << INFL_FT_LIT_BITS];
+  uint8_t       subbits[1u << INFL_FT_LIT_BITS];
+  uint_fast16_t l, sym, prev_code;
+  unsigned      main_size, used, maxbits;
+  int           left;
+
+  maxbits   = 15;
+  main_size = 1u << tablebits;
+  used      = main_size;
+
+  if (unlikely(tablebits > INFL_FT_LIT_BITS || main_size > cap))
+    return false;
+
+  memset(subbits, 0, main_size * sizeof(subbits[0]));
+
+  for (sym = 0; sym < nsyms; sym++) {
+    l = lens[sym];
+    if (unlikely(l > maxbits))
+      return false;
+    count[l]++;
+  }
+
+  left = 1;
+  for (l = 1; l <= maxbits; l++) {
+    left = (left << 1) - (int)count[l];
+    if (unlikely(left < 0))
+      return false;
+  }
+
+  prev_code = 0;
+  code[0] = next_code[0] = 0;
+  for (l = 1; l <= maxbits; l++) {
+    code[l] = (prev_code + count[l - 1]) << 1;
+    next_code[l] = code[l];
+    prev_code = code[l];
+  }
+
+  for (sym = 0; sym < nsyms; sym++) {
+    unsigned len, rev, prefix, need;
+
+    len = lens[sym];
+    if (!len)
+      continue;
+
+    rev = infl_ft_rev16((uint16_t)next_code[len]++, len);
+    if (len <= tablebits)
+      continue;
+
+    prefix = rev & (main_size - 1u);
+    need   = len - tablebits;
+    if (subbits[prefix] < need)
+      subbits[prefix] = (uint8_t)need;
+  }
+
+  for (unsigned prefix = 0; prefix < main_size; prefix++) {
+    unsigned size;
+
+    if (!subbits[prefix])
+      continue;
+
+    size = 1u << subbits[prefix];
+    if (unlikely(used + size > cap))
+      return false;
+
+    subbase[prefix] = (uint16_t)used;
+    used += size;
+  }
+
+  memset(table, 0, used * sizeof(table[0]));
+
+  for (unsigned prefix = 0; prefix < main_size; prefix++) {
+    if (subbits[prefix])
+      table[prefix] = INFL_FT_SUBENTRY(subbase[prefix], subbits[prefix], tablebits);
+  }
+
+  for (l = 1; l <= maxbits; l++)
+    next_code[l] = code[l];
+
+  for (sym = 0; sym < nsyms; sym++) {
+    uint32_t entry;
+    unsigned len, rev;
+
+    len = lens[sym];
+    if (!len)
+      continue;
+
+    rev   = infl_ft_rev16((uint16_t)next_code[len]++, len);
+    entry = litlen ? infl_ft_lit_entry(sym, len) : infl_ft_dist_entry(sym, len);
+    if (unlikely(!entry))
+      continue;
+
+    if (len <= tablebits) {
+      unsigned step, end;
+
+      step = 1u << len;
+      end  = 1u << tablebits;
+      for (unsigned idx = rev; idx < end; idx += step)
+        table[idx] = entry;
+    } else {
+      unsigned prefix, base, bits, suffix, step, end;
+
+      prefix = rev & (main_size - 1u);
+      base   = subbase[prefix];
+      bits   = subbits[prefix];
+      suffix = rev >> tablebits;
+      step   = 1u << (len - tablebits);
+      end    = 1u << bits;
+
+      for (unsigned idx = suffix; idx < end; idx += step)
+        table[base + idx] = entry;
+    }
+  }
+
+  *used_out = (uint16_t)used;
+  return true;
+}
+
+UNZ_INLINE void
+infl_ft_refill(infl_ft_bits_t * __restrict br, unsigned need) {
+  while (br->nbits < need && br->p < br->end) {
+    size_t n, avail;
+
+    n     = (64u - br->nbits) >> 3;
+    avail = (size_t)(br->end - br->p);
+    if (n > avail)
+      n = avail;
+    if (!n)
+      break;
+
+    br->bits  |= infl_load_partial_le(br->p, n) << br->nbits;
+    br->p     += n;
+    br->nbits += (unsigned)(n << 3);
+  }
+}
+
+UNZ_INLINE void
+infl_ft_refill_fast(infl_ft_bits_t * __restrict br, unsigned need) {
+  if (likely(br->nbits >= need))
+    return;
+
+  if (likely((size_t)(br->end - br->p) >= sizeof(uint64_t))) {
+    br->bits  |= (bitstream_t)infl_load64(br->p) << br->nbits;
+    br->p     += sizeof(uint64_t) - 1u;
+    br->p     -= (br->nbits >> 3) & 7u;
+    br->nbits |= 56u;
+  } else {
+    infl_ft_refill(br, need);
+  }
+}
+
+UNZ_INLINE void
+infl_ft_consume(infl_ft_bits_t * __restrict br, unsigned n) {
+  br->bits >>= n;
+  br->nbits -= n;
+}
+
+UNZ_INLINE uint32_t
+infl_ft_lookup_lit(const infl_ft_table_t * __restrict tab, bitstream_t bits) {
+  uint32_t entry;
+
+  entry = tab->table[bits & ((1u << INFL_FT_LIT_BITS) - 1u)];
+  if (likely(!(entry & INFL_FT_SUBTABLE)))
+    return entry;
+
+  return tab->table[INFL_FT_BASE(entry) +
+                    ((bits >> INFL_FT_LIT_BITS) & ((1u << INFL_FT_CODELEN(entry)) - 1u))];
+}
+
+UNZ_INLINE uint32_t
+infl_ft_lookup_dist(const infl_ft_dist_table_t * __restrict tab, bitstream_t bits) {
+  uint32_t entry;
+
+  entry = tab->table[bits & ((1u << INFL_FT_DIST_BITS) - 1u)];
+  if (likely(!(entry & INFL_FT_SUBTABLE)))
+    return entry;
+
+  return tab->table[INFL_FT_BASE(entry) +
+                    ((bits >> INFL_FT_DIST_BITS) & ((1u << INFL_FT_CODELEN(entry)) - 1u))];
+}
+
+static UnzResult
+infl_ft_stored(infl_ft_bits_t * __restrict br,
+               uint8_t        * __restrict dst,
+               size_t         * __restrict dpos,
+               size_t                      dst_cap) {
+  uint32_t header;
+  uint16_t len, nlen;
+  unsigned nbytes, shift;
+  size_t   rem;
+
+  shift = br->nbits & 7u;
+  if (shift)
+    infl_ft_consume(br, shift);
+
+  infl_ft_refill(br, 32);
+  if (unlikely(br->nbits < 32))
+    return UNZ_ERR;
+
+  header = (uint32_t)br->bits;
+  infl_ft_consume(br, 32);
+
+  len  = (uint16_t)header;
+  nlen = (uint16_t)(header >> 16);
+  if (unlikely((uint16_t)(len ^ (uint16_t)~nlen) || len > dst_cap - *dpos))
+    return UNZ_ERR;
+
+  rem    = len;
+  nbytes = br->nbits >> 3;
+  if (nbytes > rem)
+    nbytes = (unsigned)rem;
+
+  if (nbytes) {
+    switch (nbytes) {
+      case 7: dst[*dpos + 6] = (uint8_t)(br->bits >> 48); /* fall through */
+      case 6: dst[*dpos + 5] = (uint8_t)(br->bits >> 40); /* fall through */
+      case 5: dst[*dpos + 4] = (uint8_t)(br->bits >> 32); /* fall through */
+      case 4: dst[*dpos + 3] = (uint8_t)(br->bits >> 24); /* fall through */
+      case 3: dst[*dpos + 2] = (uint8_t)(br->bits >> 16); /* fall through */
+      case 2: dst[*dpos + 1] = (uint8_t)(br->bits >> 8);  /* fall through */
+      case 1: dst[*dpos]     = (uint8_t)br->bits;         /* fall through */
+      default: break;
+    }
+    infl_ft_consume(br, nbytes << 3);
+    *dpos += nbytes;
+    rem   -= nbytes;
+  }
+
+  if (unlikely((size_t)(br->end - br->p) < rem))
+    return UNZ_ERR;
+
+  if (rem)
+    memcpy(dst + *dpos, br->p, rem);
+  br->p += rem;
+  *dpos += rem;
+
+  return UNZ_OK;
+}
+
+static UNZ_HOT UnzResult
+infl_ft_block(infl_ft_bits_t              * __restrict br,
+              uint8_t                     * __restrict dst,
+              size_t                      * __restrict dpos,
+              size_t                                   dst_cap,
+              const infl_ft_table_t       * __restrict tlit,
+              const infl_ft_dist_table_t  * __restrict tdist) {
+  size_t   pos, out_rem, src;
+  unsigned len, dist, total, code_len, base;
+  uint32_t entry;
+  bool     fast_copy;
+
+  pos = *dpos;
+  infl_ft_refill_fast(br, 32);
+  entry = infl_ft_lookup_lit(tlit, br->bits);
+
+  for (;;) {
+    bitstream_t saved;
+
+    if (unlikely(!entry))
+      return UNZ_ERR;
+
+    saved    = br->bits;
+    total    = INFL_FT_TOTAL(entry);
+    code_len = INFL_FT_CODELEN(entry);
+    base     = INFL_FT_BASE(entry);
+
+    if (unlikely(br->nbits < total)) {
+      infl_ft_refill(br, total);
+      if (unlikely(br->nbits < total))
+        return UNZ_ERR;
+      saved = br->bits;
+    }
+
+    infl_ft_consume(br, total);
+
+    if (likely(entry & INFL_FT_LITERAL)) {
+      if (unlikely(pos >= dst_cap))
+        return UNZ_EFULL;
+      dst[pos++] = (uint8_t)base;
+
+      for (unsigned litrun = 2; litrun; litrun--) {
+        if (unlikely(br->nbits < 15)) {
+          infl_ft_refill_fast(br, 32);
+          if (unlikely(br->nbits < 15))
+            break;
+        }
+
+        entry = infl_ft_lookup_lit(tlit, br->bits);
+        if (unlikely((entry & INFL_FT_LITERAL) == 0))
+          goto next_symbol_ready;
+
+        total = INFL_FT_TOTAL(entry);
+        if (unlikely(br->nbits < total))
+          break;
+
+        if (unlikely(pos >= dst_cap))
+          return UNZ_EFULL;
+        dst[pos++] = (uint8_t)INFL_FT_BASE(entry);
+        infl_ft_consume(br, total);
+      }
+
+      infl_ft_refill_fast(br, 32);
+      entry = infl_ft_lookup_lit(tlit, br->bits);
+next_symbol_ready:
+      continue;
+    }
+
+    if (unlikely(entry & INFL_FT_END))
+      break;
+
+    len = base + (unsigned)((saved & (((bitstream_t)1 << total) - 1u)) >> code_len);
+
+    if (unlikely(br->nbits < 15)) {
+      infl_ft_refill_fast(br, 32);
+    }
+
+    entry = infl_ft_lookup_dist(tdist, br->bits);
+    if (unlikely(!entry))
+      return UNZ_ERR;
+
+    saved    = br->bits;
+    total    = INFL_FT_TOTAL(entry);
+    code_len = INFL_FT_CODELEN(entry);
+    dist     = INFL_FT_BASE(entry);
+
+    if (unlikely(br->nbits < total)) {
+      infl_ft_refill(br, total);
+      if (unlikely(br->nbits < total))
+        return UNZ_ERR;
+      saved = br->bits;
+    }
+
+    infl_ft_consume(br, total);
+    dist += (unsigned)((saved & (((bitstream_t)1 << total) - 1u)) >> code_len);
+
+    if (unlikely(!dist || (size_t)dist > pos))
+      return UNZ_ERR;
+
+    out_rem = dst_cap - pos;
+    if (unlikely(len > out_rem))
+      return UNZ_EFULL;
+    fast_copy = likely(out_rem >= 258u + 39u);
+
+    infl_ft_refill_fast(br, 32);
+    entry = infl_ft_lookup_lit(tlit, br->bits);
+
+    if (dist >= 8 && likely(fast_copy || (len >= 16 && len + 39 <= out_rem))) {
+      infl_copy_match_overrun(dst, &pos, dist, len);
+    } else if (dist >= 8 && likely(len + 7 <= out_rem)) {
+      infl_copy_match_word(dst, &pos, dist, len);
+    } else if (dist == 1 && likely(fast_copy || (len >= 32 && len + 39 <= out_rem))) {
+      infl_copy_rle_overrun(dst, &pos, len);
+    } else if (dist == 1 && likely(len + 7 <= out_rem)) {
+      infl_copy_rle(dst, &pos, len);
+    } else if (dist == 1) {
+      unsigned byte = dst[pos - 1];
+
+      while (len >= 8) {
+        dst[pos]   = (uint8_t)byte;
+        dst[pos+1] = (uint8_t)byte;
+        dst[pos+2] = (uint8_t)byte;
+        dst[pos+3] = (uint8_t)byte;
+        dst[pos+4] = (uint8_t)byte;
+        dst[pos+5] = (uint8_t)byte;
+        dst[pos+6] = (uint8_t)byte;
+        dst[pos+7] = (uint8_t)byte;
+        len -= 8; pos += 8;
+      }
+      while (len >= 4) {
+        dst[pos]   = (uint8_t)byte;
+        dst[pos+1] = (uint8_t)byte;
+        dst[pos+2] = (uint8_t)byte;
+        dst[pos+3] = (uint8_t)byte;
+        len -= 4; pos += 4;
+      }
+      if (len >= 1) {
+        dst[pos] = (uint8_t)byte;
+        switch (len - 1) {
+          case 2: dst[pos+2] = (uint8_t)byte; /* fall through */
+          case 1: dst[pos+1] = (uint8_t)byte; break;
+          case 0:                         break;
+        }
+        pos += len;
+      }
+    } else {
+      src = pos - dist;
+      while (len >= 8) {
+        dst[pos]   = dst[src];
+        dst[pos+1] = dst[src+1];
+        dst[pos+2] = dst[src+2];
+        dst[pos+3] = dst[src+3];
+        dst[pos+4] = dst[src+4];
+        dst[pos+5] = dst[src+5];
+        dst[pos+6] = dst[src+6];
+        dst[pos+7] = dst[src+7];
+        len -= 8; pos += 8; src += 8;
+      }
+      while (len >= 4) {
+        dst[pos]   = dst[src];
+        dst[pos+1] = dst[src+1];
+        dst[pos+2] = dst[src+2];
+        dst[pos+3] = dst[src+3];
+        len -= 4; pos += 4; src += 4;
+      }
+      if (len >= 1) {
+        dst[pos] = dst[src];
+        switch (len - 1) {
+          case 2: dst[pos+2] = dst[src+2]; /* fall through */
+          case 1: dst[pos+1] = dst[src+1]; break;
+          case 0:                         break;
+        }
+        pos += len;
+      }
+    }
+  }
+
+  *dpos = pos;
+  return UNZ_OK;
+}
+
+static UnzResult
+infl_ft_dynamic(infl_ft_bits_t         * __restrict br,
+                infl_ft_table_t        * __restrict tlit,
+                infl_ft_dist_table_t   * __restrict tdist) {
+  union {
+    uint_fast8_t codelens[MAX_CODELEN_CODES];
+    uint8_t      lens[MAX_LITLEN_CODES + MAX_DIST_CODES];
+  } lens;
+  huff_fast_entry_t tcodelen[HUFF_FAST_TABLE_SIZE];
+  huff_fast_entry_t fe;
+  int               i, n, hclen, hlit, hdist, repeat, prev;
+
+  memset(&lens, 0, sizeof(lens));
+
+  infl_ft_refill(br, 14);
+  if (unlikely(br->nbits < 14))
+    return UNZ_ERR;
+
+  hlit  = (int)(br->bits & 0x1Fu) + 257;
+  hdist = (int)((br->bits >> 5) & 0x1Fu) + 1;
+  hclen = (int)((br->bits >> 10) & 0xFu) + 4;
+  n     = hlit + hdist;
+  infl_ft_consume(br, 14);
+
+  if (unlikely(n > MAX_LITLEN_CODES + MAX_DIST_CODES))
+    return UNZ_ERR;
+
+  for (i = 0; i < hclen; i++) {
+    infl_ft_refill(br, 3);
+    if (unlikely(br->nbits < 3))
+      return UNZ_ERR;
+    lens.codelens[ord[i]] = (uint_fast8_t)(br->bits & 0x7u);
+    infl_ft_consume(br, 3);
+  }
+
+  if (unlikely(!huff_init_fast_lsb(tcodelen, (const uint8_t *)lens.codelens,
+                                  NULL, MAX_CODELEN_CODES)))
+    return UNZ_ERR;
+
+  for (i = MAX_CODELEN_CODES; i;)
+    lens.codelens[--i] = 0;
+
+  while (i < n) {
+    infl_ft_refill(br, 14);
+    if (unlikely(br->nbits < 7))
+      return UNZ_ERR;
+
+    fe = tcodelen[(uint8_t)br->bits];
+    if (unlikely(!fe.len || fe.sym > 18))
+      return UNZ_ERR;
+    infl_ft_consume(br, fe.len);
+
+    switch (fe.sym) {
+      default:
+        lens.lens[i++] = (uint8_t)fe.sym;
+        break;
+      case 16:
+        if (unlikely(br->nbits < 2 || i == 0))
+          return UNZ_ERR;
+        repeat = 3 + (int)(br->bits & 0x3u);
+        infl_ft_consume(br, 2);
+        if (unlikely(i + repeat > n))
+          return UNZ_ERR;
+        prev = lens.lens[i - 1];
+        while (repeat--)
+          lens.lens[i++] = (uint8_t)prev;
+        break;
+      case 17:
+        if (unlikely(br->nbits < 3))
+          return UNZ_ERR;
+        repeat = 3 + (int)(br->bits & 0x7u);
+        infl_ft_consume(br, 3);
+        if (unlikely(i + repeat > n))
+          return UNZ_ERR;
+        i += repeat;
+        break;
+      case 18:
+        if (unlikely(br->nbits < 7))
+          return UNZ_ERR;
+        repeat = 11 + (int)(br->bits & 0x7Fu);
+        infl_ft_consume(br, 7);
+        if (unlikely(i + repeat > n))
+          return UNZ_ERR;
+        i += repeat;
+        break;
+    }
+  }
+
+  if (unlikely(!infl_ft_build(tlit->table, &tlit->used, lens.lens,
+                              (uint16_t)hlit, INFL_FT_LIT_BITS,
+                              INFL_FT_LIT_CAP, true) ||
+               !infl_ft_build(tdist->table, &tdist->used, lens.lens + hlit,
+                              (uint16_t)hdist, INFL_FT_DIST_BITS,
+                              INFL_FT_DIST_CAP, false)))
+    return UNZ_ERR;
+
+  tlit->bits  = INFL_FT_LIT_BITS;
+  tdist->bits = INFL_FT_DIST_BITS;
+  return UNZ_OK;
+}
+
+static UnzResult
+infl_ft_full(defl_stream_t * __restrict stream) {
+  static infl_ft_table_t      fixed_lit;
+  static infl_ft_dist_table_t fixed_dist;
+  static bool                 fixed_init;
+
+  infl_ft_table_t      dyn_lit;
+  infl_ft_dist_table_t dyn_dist;
+  infl_ft_bits_t       br;
+  const uint8_t       *p, *end;
+  uint8_t             *dst;
+  size_t               dpos, dst_cap;
+  uint_fast8_t         bfinal, btype;
+  bool                 zlib;
+
+  if (!stream->start || stream->start != stream->end ||
+      stream->dstpos != 0 || stream->bs.chunk || stream->header)
+    return UNZ_NOOP;
+
+  p   = stream->start->p;
+  end = stream->start->end;
+  if (!p || p >= end)
+    return UNZ_NOOP;
+
+  zlib = stream->flags == INFL_ZLIB;
+  if (zlib) {
+    uint8_t cmf, flg;
+
+    if (unlikely((size_t)(end - p) < 2))
+      return UNZ_ERR;
+
+    cmf = p[0];
+    flg = p[1];
+    if (unlikely((cmf & 0x0f) != 8 || (cmf >> 4) > 7 ||
+                 ((((uint16_t)cmf << 8) + flg) % 31) != 0 ||
+                 (flg & 0x20)))
+      return UNZ_ERR;
+    p += 2;
+  } else if (stream->flags != 0) {
+    return UNZ_NOOP;
+  }
+
+  if (!fixed_init) {
+    if (unlikely(!infl_ft_build(fixed_lit.table, &fixed_lit.used, fxd, 288,
+                                INFL_FT_LIT_BITS, INFL_FT_LIT_CAP, true) ||
+                 !infl_ft_build(fixed_dist.table, &fixed_dist.used, fxd + 288,
+                                32, INFL_FT_DIST_BITS, INFL_FT_DIST_CAP,
+                                false)))
+      return UNZ_ERR;
+    fixed_lit.bits  = INFL_FT_LIT_BITS;
+    fixed_dist.bits = INFL_FT_DIST_BITS;
+    fixed_init = true;
+  }
+
+  br.p     = p;
+  br.end   = end;
+  br.bits  = 0;
+  br.nbits = 0;
+  dst      = stream->dst;
+  dst_cap  = stream->dstlen;
+  dpos     = 0;
+  bfinal   = 0;
+
+  while (!bfinal) {
+    infl_ft_refill(&br, 3);
+    if (unlikely(br.nbits < 3))
+      return UNZ_ERR;
+
+    bfinal = (uint_fast8_t)(br.bits & 1u);
+    btype  = (uint_fast8_t)((br.bits >> 1) & 3u);
+    infl_ft_consume(&br, 3);
+
+    switch (btype) {
+      case 0:
+        if (unlikely(infl_ft_stored(&br, dst, &dpos, dst_cap) != UNZ_OK))
+          return UNZ_ERR;
+        break;
+      case 1:
+        if (unlikely(infl_ft_block(&br, dst, &dpos, dst_cap,
+                                   &fixed_lit, &fixed_dist) < UNZ_OK))
+          return UNZ_ERR;
+        break;
+      case 2:
+        if (unlikely(infl_ft_dynamic(&br, &dyn_lit, &dyn_dist) != UNZ_OK))
+          return UNZ_ERR;
+        if (unlikely(infl_ft_block(&br, dst, &dpos, dst_cap,
+                                   &dyn_lit, &dyn_dist) < UNZ_OK))
+          return UNZ_ERR;
+        break;
+      default:
+        return UNZ_ERR;
+    }
+  }
+
+  stream->dstpos    = dpos;
+  stream->bs.chunk  = stream->start;
+  stream->bs.p      = br.p;
+  stream->bs.end    = br.end;
+  stream->bs.bits   = br.bits;
+  stream->bs.nbits  = br.nbits;
+  stream->bs.pbits  = 0;
+  stream->bs.npbits = 0;
+  if (zlib)
+    stream->header = stream;
+
+  return UNZ_OK;
+}
+
 #define REFILL(req)                                                           \
   if (unlikely(bs.nbits < (req))) {                                           \
     int take;                                                                 \
@@ -798,11 +1513,17 @@ infl(defl_stream_t * __restrict stream) {
 
   unz__bitstate_t bs;
   uint_fast8_t    btype, bfinal = 0;
-  UnzResult       stored_res;
+  UnzResult       ft_res, stored_res;
 
   stored_res = infl_stored_direct(stream);
   if (stored_res != UNZ_NOOP && stored_res != UNZ_UNFINISHED)
     return stored_res;
+
+  if (stored_res == UNZ_NOOP && stream->srclen <= (stream->dstlen >> 2)) {
+    ft_res = infl_ft_full(stream);
+    if (ft_res != UNZ_NOOP)
+      return ft_res;
+  }
 
   if (stored_res == UNZ_NOOP) {
     if (!stream->bs.chunk && !(stream->bs.chunk = stream->start))
