@@ -16,6 +16,83 @@
 
 #include "apicommon.h"
 
+UNZ_INLINE uint64_t
+infl_load64(const uint8_t * __restrict p) {
+  uint64_t v;
+  memcpy(&v, p, sizeof(v));
+  return v;
+}
+
+UNZ_INLINE void
+infl_store64(uint8_t * __restrict p, uint64_t v) {
+  memcpy(p, &v, sizeof(v));
+}
+
+UNZ_INLINE void
+infl_copy_rle(uint8_t * __restrict dst, size_t * __restrict dpos, unsigned len) {
+  uint8_t  byte;
+  uint64_t word;
+  size_t   pos, end;
+
+  pos  = *dpos;
+  byte = dst[pos - 1];
+  word = UINT64_C(0x0101010101010101) * byte;
+  end  = pos + len;
+
+  do {
+    infl_store64(dst + pos, word);
+    pos += 8;
+  } while (pos < end);
+
+  *dpos = end;
+}
+
+UNZ_INLINE void
+infl_copy_match_word(uint8_t * __restrict dst,
+                     size_t  * __restrict dpos,
+                     unsigned             dist,
+                     unsigned             len) {
+  const uint8_t *src;
+  size_t         pos, end;
+
+  pos = *dpos;
+  src = dst + pos - dist;
+  end = pos + len;
+
+  do {
+    infl_store64(dst + pos, infl_load64(src));
+    src += 8;
+    pos += 8;
+  } while (pos < end);
+
+  *dpos = end;
+}
+
+UNZ_INLINE void
+infl_copy_match_overrun(uint8_t * __restrict dst,
+                        size_t  * __restrict dpos,
+                        unsigned             dist,
+                        unsigned             len) {
+  const uint8_t *src;
+  size_t         pos, end;
+
+  pos = *dpos;
+  src = dst + pos - dist;
+  end = pos + len;
+
+  do {
+    infl_store64(dst + pos,      infl_load64(src));
+    infl_store64(dst + pos + 8,  infl_load64(src + 8));
+    infl_store64(dst + pos + 16, infl_load64(src + 16));
+    infl_store64(dst + pos + 24, infl_load64(src + 24));
+    infl_store64(dst + pos + 32, infl_load64(src + 32));
+    src += 40;
+    pos += 40;
+  } while (pos < end);
+
+  *dpos = end;
+}
+
 #define REFILL(req)                                                           \
   if (unlikely(bs.nbits < (req))) {                                           \
     int take;                                                                 \
@@ -146,7 +223,7 @@ infl_block(defl_stream_t          * __restrict stream,
   uint8_t * __restrict dst;
   size_t  * __restrict dst_pos;
   unz__bitstate_t bs;
-  size_t          dst_cap, dpos, src;
+  size_t          dst_cap, dpos, src, out_rem;
   unsigned        len,  dist;
   uint_fast16_t   lsym;
   uint8_t         used;
@@ -172,6 +249,20 @@ infl_block(defl_stream_t          * __restrict stream,
       if (unlikely(dpos >= dst_cap))
         return UNZ_EFULL;
       dst[dpos++] = (uint8_t)lsym;
+
+      for (unsigned litrun = 2; litrun && likely(dpos < dst_cap); litrun--) {
+        const huff_fast_entry_ext_t *fe;
+
+        if (unlikely(bs.nbits < HUFF_FAST_TABLE_BITS))
+          break;
+
+        fe = &tlit->fast[(uint8_t)bs.bits];
+        if (unlikely(!fe->len || fe->sym >= 256))
+          break;
+
+        dst[dpos++] = (uint8_t)fe->sym;
+        CONSUME(fe->len);
+      }
       continue;
     } else if (unlikely(lsym == 256)) {
       /* eof */
@@ -186,11 +277,18 @@ infl_block(defl_stream_t          * __restrict stream,
       return UNZ_ERR;
     CONSUME(used);
 
-    if (unlikely(len > dst_cap - dpos))
+    out_rem = dst_cap - dpos;
+    if (unlikely(len > out_rem))
       return UNZ_EFULL;
 
-    /* output back-reference */
-    if (dist == 1) {
+    /* Fast match copies may over-write a few future bytes; keep it in bounds. */
+    if (dist >= 8 && len >= 16 && likely(len + 39 <= out_rem)) {
+      infl_copy_match_overrun(dst, &dpos, dist, len);
+    } else if (dist >= 8 && likely(len + 7 <= out_rem)) {
+      infl_copy_match_word(dst, &dpos, dist, len);
+    } else if (dist == 1 && likely(len + 7 <= out_rem)) {
+      infl_copy_rle(dst, &dpos, len);
+    } else if (dist == 1) {
       used = dst[dpos - 1];
 #if defined(__ARM_NEON) || defined(__ARM_NEON__)
       if (len >= 16) {
