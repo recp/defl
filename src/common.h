@@ -63,7 +63,6 @@ struct unz__chunk_t {
   struct unz__chunk_t *next;
   const uint8_t       *p;
   const uint8_t       *end;
-  size_t               bitpos;
   uint8_t             *buffer;        /* owned buffer for appendable chunks  */
   size_t               buffer_size;   /* total buffer size                   */
   size_t               used;          /* used bytes in buffer                */
@@ -178,7 +177,6 @@ struct unz__stream_t {
   /* chunk structure pool - for non-appendable chunks */
   unz_chunk_t           *chunk_struct_pool[UNZ_CHUNK_STRUCT_POOL_SIZE];
   int                    struct_pool_used;
-  int                    struct_pool_available;
 
   /* statistics for tuning (optional - can be ifdef'd out in release) */
 #ifdef UNZ_STATS

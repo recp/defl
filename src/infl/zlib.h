@@ -38,8 +38,7 @@ getbyt(defl_chunk_t ** __restrict chunkref,
   if (!ch->p || ch->p >= ch->end)
     return UNZ_ERR;
 
-  *dst        = *ch->p++;
-  ch->bitpos += 8;
+  *dst = *ch->p++;
   return UNZ_OK;
 }
 

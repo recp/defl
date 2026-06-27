@@ -17,14 +17,6 @@
 #include "../common.h"
 #include "../../include/defl/infl.h"
 
-#if defined(__ARM_NEON) || defined(__ARM_NEON__)
-#  include <arm_neon.h>
-#endif
-
-#if defined(__AVX2__)
-#  include <immintrin.h>
-#endif
-
  /* Platform-specific aligned allocation helpers */
 #ifdef _WIN32
 #  include <malloc.h>
@@ -77,10 +69,11 @@ get_pooled_chunk(infl_stream_t * __restrict stream) {
   }
 
   stream->pool_used = idx + 1;
-  chk->used         = 0;
-  chk->p            = chk->buffer;
-  chk->end          = chk->buffer;
-  chk->next         = NULL;
+  chk->used          = 0;
+  chk->p             = chk->buffer;
+  chk->end           = chk->buffer;
+  chk->next          = NULL;
+  chk->is_appendable = true;
   return chk;
 }
 
@@ -102,83 +95,20 @@ get_pooled_chunk_struct(infl_stream_t * __restrict stream) {
     stream->chunk_struct_pool[idx] = chk;
   }
 
-  stream->struct_pool_used      = idx + 1;
-  stream->struct_pool_available = UNZ_CHUNK_STRUCT_POOL_SIZE - stream->struct_pool_used;
+  stream->struct_pool_used = idx + 1;
 
-  memset(chk, 0, sizeof(*chk));
+  chk->next          = NULL;
   chk->is_pooled     = true;
   chk->is_appendable = false;
 
   return chk;
 }
 
-/* prefetch data for better performance */
-static inline void
-prefetch_data(const void *addr, size_t len) {
-#if defined(__GNUC__) || defined(__clang__)
-  const char *p = (const char *)addr;
-#else
-  (void)addr;
-#endif
-  (void)len;
-#if defined(__GNUC__) || defined(__clang__)
-  __builtin_prefetch(p, 0, 1);
-  if (len >= 128) __builtin_prefetch(p + 64,  0, 1);
-  if (len >= 256) __builtin_prefetch(p + 192, 0, 1);
-  if (len >= 512) __builtin_prefetch(p + 448, 0, 1);
-#endif
-}
-
-/* optimized memory copy with SIMD when available */
+/* Let the platform memcpy handle size/alignment-specific dispatch. */
 static inline void
 fast_memcpy(uint8_t * __restrict dst, const uint8_t * __restrict src, size_t len) {
-  size_t i = 0;
-  
-#if defined(__AVX2__)
-  /* AVX2 copy for aligned data */
-  if (((uintptr_t)dst & 31) == 0 && ((uintptr_t)src & 31) == 0) {
-    for (; i + 63 < len; i += 64) {
-      _mm256_store_si256((__m256i*)(dst + i), 
-                         _mm256_load_si256((const __m256i*)(src + i)));
-      _mm256_store_si256((__m256i*)(dst + i + 32), 
-                         _mm256_load_si256((const __m256i*)(src + i + 32)));
-    }
-  } else {
-    /* Unaligned AVX2 copy */
-    for (; i + 63 < len; i += 64) {
-      _mm256_storeu_si256((__m256i*)(dst + i), 
-                          _mm256_loadu_si256((const __m256i*)(src + i)));
-      _mm256_storeu_si256((__m256i*)(dst + i + 32), 
-                          _mm256_loadu_si256((const __m256i*)(src + i + 32)));
-    }
-  }
-#elif defined(__ARM_NEON) || defined(__ARM_NEON__)
-  /* NEON copy */
-  for (; i + 63 < len; i += 64) {
-    vst1q_u8(dst + i,      vld1q_u8(src + i));
-    vst1q_u8(dst + i + 16, vld1q_u8(src + i + 16));
-    vst1q_u8(dst + i + 32, vld1q_u8(src + i + 32));
-    vst1q_u8(dst + i + 48, vld1q_u8(src + i + 48));
-  }
-#endif
-
-  /* handle remaining bytes with unrolled loops */
-  for (; i + 7 < len; i += 8) {
-    uint64_t word;
-    memcpy(&word, src + i, sizeof(word));
-    memcpy(dst + i, &word, sizeof(word));
-  }
-
-  /* handle final bytes */
-  switch (len - i) {
-    case 7: dst[i+6] = src[i+6]; /* fall through */
-    case 6: dst[i+5] = src[i+5]; /* fall through */
-    case 5: dst[i+4] = src[i+4]; /* fall through */
-    case 4: dst[i+3] = src[i+3]; /* fall through */
-    case 3: dst[i+2] = src[i+2]; /* fall through */
-    case 2: dst[i+1] = src[i+1]; /* fall through */
-    case 1: dst[i]   = src[i];   break;
-  }
+  if (len)
+    memcpy(dst, src, len);
 }
 
 UNZ_EXPORT
@@ -188,11 +118,6 @@ infl_include(infl_stream_t * __restrict stream,
              uint32_t                   len) {
   unz_chunk_t *chk;
   
-  /* prefetch source data for better performance */
-  if (len >= 256) {
-    prefetch_data(ptr, len);
-  }
-
   if (stream->current_appendable &&
       stream->current_appendable->is_appendable &&
       len <= stream->current_appendable->buffer_size - stream->current_appendable->used) {
@@ -294,21 +219,10 @@ fallback_alloc:
 UNZ_EXPORT
 void
 infl_reset_pool(infl_stream_t * __restrict stream) {
-  int i;
-  
-  /* reset appendable chunks */
-  for (i = 0; i < stream->pool_used; i++) {
-    stream->chunk_pool[i]->used          = 0;
-    stream->chunk_pool[i]->next          = NULL;
-    stream->chunk_pool[i]->p             = stream->chunk_pool[i]->buffer;
-    stream->chunk_pool[i]->end           = stream->chunk_pool[i]->buffer;
-    stream->chunk_pool[i]->is_appendable = true;
-  }
   stream->pool_used = 0;
   
   /* reset structure pool */
   stream->struct_pool_used = 0;
-  stream->struct_pool_available = UNZ_CHUNK_STRUCT_POOL_SIZE;
   
   /* Reset stream state */
   stream->current_appendable = NULL;

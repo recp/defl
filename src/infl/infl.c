@@ -1378,8 +1378,8 @@ infl_raw(defl_stream_t   * __restrict stream,
   uint8_t        *dst;
   const uint8_t  *p;
   unz__bitstate_t bs;
-  unsigned        dpos, dlen, nbytes, chkrem, n, remlen, i, simdlen;
-  uint32_t        header, val;
+  unsigned        dpos, dlen, chkrem, n, remlen, i, simdlen, align;
+  uint32_t        header;
   uint16_t        len, nlen;
 
   dpos = (unsigned)*dst_pos;
@@ -1389,11 +1389,8 @@ infl_raw(defl_stream_t   * __restrict stream,
   bs = *state;
 
   /* align to byte boundary */
-  if (bs.nbits & 7) {
-    int shift = bs.nbits & 7;
-    bs.bits >>= shift;
-    bs.nbits -= shift;
-  }
+  if ((align = infl_byte_align_drop(&bs)))
+    infl_drop_bits(&bs, align);
 
   REFILL(32);
   header = (uint32_t)bs.bits;
@@ -1408,43 +1405,9 @@ infl_raw(defl_stream_t   * __restrict stream,
   remlen = len;
   dst    = stream->dst + dpos;
 
-  /* flush bs.bits */
-  nbytes = bs.nbits >> 3;
-  if (nbytes > 0 && remlen > 0) {
-    nbytes = (nbytes < remlen) ? nbytes : remlen;
-    if (nbytes <= 4) {
-      val = (uint32_t)bs.bits;
-      switch (nbytes) {
-        case 4: dst[3] = (uint8_t)(val >> 24); /* fall through */
-        case 3: dst[2] = (uint8_t)(val >> 16); /* fall through */
-        case 2: dst[1] = (uint8_t)(val >> 8);  /* fall through */
-        case 1: dst[0] = (uint8_t)val;
-      }
-    } else {
-      for (i = 0; i < nbytes; i++)
-        dst[i] = (uint8_t)(bs.bits >> (i << 3));
-    }
-    i = nbytes << 3;
-    if (i == sizeof(bs.bits) * 8) bs.bits = 0;
-    else                          bs.bits >>= i;
-    bs.nbits -= (int)i;
-    dst      += nbytes;
-    remlen   -= nbytes;
-  }
-
-  /* flush bs.pbits */
-  nbytes = bs.npbits >> 3;
-  if (nbytes > 0 && remlen > 0) {
-    nbytes = (nbytes < remlen) ? nbytes : remlen;
-    for (i = 0; i < nbytes; i++) {
-      dst[i] = (uint8_t)(bs.pbits >> (i << 3));
-    }
-    i = nbytes << 3;
-    if (i == sizeof(bs.pbits) * 8) bs.pbits = 0;
-    else                           bs.pbits >>= i;
-    bs.npbits -= (int)i;
-    dst       += nbytes;
-    remlen    -= nbytes;
+  while (remlen > 0 && bs.nbits + bs.npbits >= 8) {
+    *dst++ = infl_take_byte(&bs);
+    remlen--;
   }
 
   while (remlen > 0) {

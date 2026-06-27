@@ -71,4 +71,61 @@ UNZ_INLINE int min(int a, int b) { return a < b ? a : b; }
 #define RESTORE()     bs=stream->bs;
 #define DONATE()      stream->bs=bs;
 
+UNZ_INLINE unsigned
+infl_byte_align_drop(const unz__bitstate_t * __restrict bs) {
+  return (bs->nbits + bs->npbits) & 7u;
+}
+
+UNZ_INLINE void
+infl_drop_bits(unz__bitstate_t * __restrict bs, unsigned n) {
+  if (!n)
+    return;
+
+  if (n <= bs->nbits) {
+    bs->bits >>= n;
+    bs->nbits -= n;
+    return;
+  }
+
+  n -= bs->nbits;
+  bs->bits  = 0;
+  bs->nbits = 0;
+
+  if (n >= bs->npbits) {
+    bs->pbits  = 0;
+    bs->npbits = 0;
+    return;
+  }
+
+  bs->pbits >>= n;
+  bs->npbits -= n;
+}
+
+UNZ_INLINE uint8_t
+infl_take_byte(unz__bitstate_t * __restrict bs) {
+  uint8_t byte;
+  unsigned need;
+
+  if (bs->nbits >= 8) {
+    byte = (uint8_t)bs->bits;
+    bs->bits >>= 8;
+    bs->nbits -= 8;
+    return byte;
+  }
+
+  byte = (uint8_t)bs->bits;
+  need = 8u - bs->nbits;
+
+  bs->bits  = 0;
+  bs->nbits = 0;
+
+  if (need) {
+    byte |= (uint8_t)((bs->pbits & (((bitstream_t)1 << need) - 1u)) << (8u - need));
+    bs->pbits >>= need;
+    bs->npbits -= need;
+  }
+
+  return byte;
+}
+
 #endif /* api_common_h */
