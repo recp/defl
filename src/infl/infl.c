@@ -597,17 +597,7 @@ infl_ft_refill(infl_ft_bits_t * __restrict br, unsigned need) {
 
 UNZ_INLINE void
 infl_ft_refill_fast(infl_ft_bits_t * __restrict br, unsigned need) {
-  if (likely(br->nbits >= need))
-    return;
-
-  if (likely((size_t)(br->end - br->p) >= sizeof(uint64_t))) {
-    br->bits  |= (bitstream_t)infl_load64(br->p) << br->nbits;
-    br->p     += sizeof(uint64_t) - 1u;
-    br->p     -= (br->nbits >> 3) & 7u;
-    br->nbits |= 56u;
-  } else {
-    infl_ft_refill(br, need);
-  }
+  infl_ft_refill(br, need);
 }
 
 UNZ_INLINE void
