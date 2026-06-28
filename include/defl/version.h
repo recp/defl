@@ -19,6 +19,6 @@
 
 #define DEFL_VERSION_MAJOR 0
 #define DEFL_VERSION_MINOR 1
-#define DEFL_VERSION_PATCH 0
+#define DEFL_VERSION_PATCH 1
 
 #endif /* defl_version_h */
