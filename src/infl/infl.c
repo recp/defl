@@ -597,6 +597,32 @@ infl_ft_refill(infl_ft_bits_t * __restrict br, unsigned need) {
 
 UNZ_INLINE void
 infl_ft_refill_fast(infl_ft_bits_t * __restrict br, unsigned need) {
+  const unsigned bit_width = (unsigned)(sizeof(bitstream_t) * 8u);
+
+  if (likely(br->nbits >= need))
+    return;
+
+  if (likely((size_t)(br->end - br->p) >= sizeof(uint64_t))) {
+    bitstream_t loaded;
+    unsigned    loaded_bits;
+    unsigned    n;
+
+    n = (bit_width - br->nbits) >> 3;
+    if (n > sizeof(uint64_t))
+      n = sizeof(uint64_t);
+    if (likely(n > 0)) {
+      loaded = (bitstream_t)infl_load64(br->p);
+      loaded_bits = n << 3;
+      if (loaded_bits < bit_width)
+        loaded &= (((bitstream_t)1 << loaded_bits) - 1u);
+
+      br->bits  |= loaded << br->nbits;
+      br->p     += n;
+      br->nbits += loaded_bits;
+      return;
+    }
+  }
+
   infl_ft_refill(br, need);
 }
 
