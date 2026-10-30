@@ -1003,7 +1003,7 @@ static UnzResult
 infl_ft_full(defl_stream_t * __restrict stream) {
   static infl_ft_table_t      fixed_lit;
   static infl_ft_dist_table_t fixed_dist;
-  static bool                 fixed_init;
+  static atomic_int           fixed_state;
 
   infl_ft_table_t      dyn_lit;
   infl_ft_dist_table_t dyn_dist;
@@ -1012,7 +1012,7 @@ infl_ft_full(defl_stream_t * __restrict stream) {
   uint8_t             *dst;
   size_t               dpos, dst_cap;
   uint_fast8_t         bfinal, btype;
-  bool                 zlib;
+  bool                 zlib, fixed_ok;
 
   if (!stream->start || stream->start != stream->end ||
       stream->dstpos != 0 || stream->bs.chunk || stream->header)
@@ -1041,14 +1041,27 @@ infl_ft_full(defl_stream_t * __restrict stream) {
     return UNZ_NOOP;
   }
 
-  if (!fixed_init) {
-    if (unlikely(!infl_ft_build(fixed_lit.table, &fixed_lit.used, fxd, 288,
-                                INFL_FT_LIT_BITS, INFL_FT_LIT_CAP, true) ||
-                 !infl_ft_build(fixed_dist.table, &fixed_dist.used, fxd + 288,
-                                32, INFL_FT_DIST_BITS, INFL_FT_DIST_CAP,
-                                false)))
+  if (atomic_load_explicit(&fixed_state, memory_order_acquire) != 2) {
+    if (infl_fixed_begin(&fixed_state)) {
+      fixed_ok = infl_ft_build(fixed_lit.table,
+                               &fixed_lit.used,
+                               fxd,
+                               288,
+                               INFL_FT_LIT_BITS,
+                               INFL_FT_LIT_CAP,
+                               true)
+                 && infl_ft_build(fixed_dist.table,
+                                  &fixed_dist.used,
+                                  fxd + 288,
+                                  32,
+                                  INFL_FT_DIST_BITS,
+                                  INFL_FT_DIST_CAP,
+                                  false);
+      atomic_store_explicit(&fixed_state, fixed_ok ? 2 : -1, memory_order_release);
+    }
+
+    if (unlikely(atomic_load_explicit(&fixed_state, memory_order_acquire) != 2))
       return UNZ_ERR;
-    fixed_init = true;
   }
 
   br.p     = p;
@@ -1508,13 +1521,13 @@ UNZ_EXPORT
 int
 infl(defl_stream_t * __restrict stream) {
   static huff_table_ext_t _tlitl={0},_tdist={0};
-  static bool             _init=false;
+  static atomic_int       fixed_state;
 
   unz__bitstate_t bs;
   size_t          dpos = stream->dstpos;
   uint_fast8_t    btype, bfinal = 0;
   UnzResult       ft_res, stored_res;
-  bool            try_stored;
+  bool            try_stored, fixed_ok;
 
   try_stored = true;
   if (stream->start && stream->start == stream->end &&
@@ -1550,13 +1563,15 @@ infl(defl_stream_t * __restrict stream) {
     }
   }
 
-  /* initilize static tables */
-  if (!_init) {
-    if (!huff_init_lsb_extof(&_tlitl,fxd,NULL,lvals,257,288) ||
-        !huff_init_lsb_ext(&_tdist,fxd+288,NULL,dvals,32)) {
-      goto err;
+  if (atomic_load_explicit(&fixed_state, memory_order_acquire) != 2) {
+    if (infl_fixed_begin(&fixed_state)) {
+      fixed_ok = huff_init_lsb_extof(&_tlitl, fxd, NULL, lvals, 257, 288)
+                 && huff_init_lsb_ext(&_tdist, fxd + 288, NULL, dvals, 32);
+      atomic_store_explicit(&fixed_state, fixed_ok ? 2 : -1, memory_order_release);
     }
-    _init = true;
+
+    if (atomic_load_explicit(&fixed_state, memory_order_acquire) != 2)
+      goto err;
   }
 
   if (stored_res == UNZ_NOOP) {

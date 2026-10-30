@@ -471,11 +471,12 @@ infl_stream(infl_stream_t * __restrict stream,
             const void    * __restrict src,
             uint32_t                   srclen) {
   static huff_table_ext_t _tlitl_s={0},_tdist_s={0};
-  static bool             _init_s=false;
+  static atomic_int       fixed_state;
 
   unz__bitstate_t bs;
   uint_fast8_t    btype, bfinal=0;
   UnzResult       res;
+  bool            fixed_ok;
 
   /* add new data */
   if (src && srclen > 0) {
@@ -506,13 +507,15 @@ infl_stream(infl_stream_t * __restrict stream,
   if (!src && srclen == 0 && stream->ss.state == INFL_STATE_NONE)
     goto noop;
 
-  /* initialize static tables for streaming */
-  if (!_init_s) {
-    if (!huff_init_lsb_extof(&_tlitl_s,fxd,NULL,lvals,257,288) ||
-        !huff_init_lsb_ext(&_tdist_s,fxd+288,NULL,dvals,32)) {
-      goto err;
+  if (atomic_load_explicit(&fixed_state, memory_order_acquire) != 2) {
+    if (infl_fixed_begin(&fixed_state)) {
+      fixed_ok = huff_init_lsb_extof(&_tlitl_s, fxd, NULL, lvals, 257, 288)
+                 && huff_init_lsb_ext(&_tdist_s, fxd + 288, NULL, dvals, 32);
+      atomic_store_explicit(&fixed_state, fixed_ok ? 2 : -1, memory_order_release);
     }
-    _init_s = true;
+
+    if (atomic_load_explicit(&fixed_state, memory_order_acquire) != 2)
+      goto err;
   }
 
   /* resume from saved state */

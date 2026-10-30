@@ -20,6 +20,7 @@
 #include "zlib.h"
 #include "../common.h"
 #include "../../include/defl/infl.h"
+#include <stdatomic.h>
 
 #if defined(__ARM_NEON) || defined(__ARM_NEON__)
 #  include <arm_neon.h>
@@ -62,6 +63,24 @@ static const uint_fast8_t
     7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,8,8,8,8,8,8,8,8,
     5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5
   };
+
+/* publish shared tables after construction: 0 new, 1 building, 2 ready,
+ * -1 failed. waiting decoders only observe completed tables. */
+UNZ_INLINE bool
+infl_fixed_begin(atomic_int *state) {
+  int expected = 0;
+
+  if (atomic_compare_exchange_strong_explicit(state,
+                                            &expected,
+                                            1,
+                                            memory_order_acq_rel,
+                                            memory_order_acquire))
+    return true;
+
+  while (atomic_load_explicit(state, memory_order_acquire) == 1) {}
+
+  return false;
+}
 
 #undef min
 UNZ_INLINE int min(int a, int b) { return a < b ? a : b; }
