@@ -67,6 +67,12 @@ decode(void *arg) {
       if (mode == 1) {
         infl_include(stream, chunks[0], (uint32_t)half);
         infl_include(stream, chunks[1], (uint32_t)(sizeof(input) - half));
+      } else if (mode == 3) {
+        result = infl_set_input(stream, input, sizeof(input));
+        if (result != UNZ_OK) {
+          atomic_fetch_add(&failures, 1);
+          break;
+        }
       } else {
         infl_include(stream, input, sizeof(input));
       }
@@ -99,7 +105,7 @@ main(int argc, char **argv) {
     return 2;
 
   mode = atoi(argv[1]);
-  if (mode < 0 || mode > 2)
+  if (mode < 0 || mode > 3)
     return 2;
 
   for (i = 0; i < WORKERS; i++) {

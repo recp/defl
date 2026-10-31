@@ -112,6 +112,32 @@ fast_memcpy(uint8_t * __restrict dst, const uint8_t * __restrict src, size_t len
 }
 
 UNZ_EXPORT
+int
+infl_set_input(infl_stream_t * __restrict stream,
+               const void    * __restrict ptr,
+               uint32_t                   len) {
+  unz_chunk_t *chunk;
+
+  if (!stream || (!ptr && len > 0) || stream->start || stream->dstpos > 0
+      || stream->ss.state != INFL_STATE_NONE)
+    return UNZ_ERR;
+  if (len == 0)
+    return UNZ_OK;
+  if (!(chunk = get_pooled_chunk_struct(stream)))
+    return UNZ_ENOMEM;
+
+  chunk->p           = ptr;
+  chunk->end         = (const uint8_t *)ptr + len;
+  chunk->buffer      = NULL;
+  chunk->buffer_size = 0;
+  chunk->used        = len;
+  stream->start      = chunk;
+  stream->end        = chunk;
+  stream->srclen     = len;
+  return UNZ_OK;
+}
+
+UNZ_EXPORT
 void
 infl_include(infl_stream_t * __restrict stream,
              const void    * __restrict ptr,
@@ -219,6 +245,15 @@ fallback_alloc:
 UNZ_EXPORT
 void
 infl_reset_pool(infl_stream_t * __restrict stream) {
+  unz_chunk_t *chunk, *next;
+
+  /* overflow descriptors are not retained by either reusable pool. */
+  for (chunk = stream->start; chunk; chunk = next) {
+    next = chunk->next;
+    if (!chunk->is_pooled)
+      free(chunk);
+  }
+
   stream->pool_used = 0;
   
   /* reset structure pool */

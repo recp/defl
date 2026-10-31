@@ -82,6 +82,22 @@ infl_include(infl_stream_t * __restrict stream,
              uint32_t                   len);
 
 /*!
+ * @brief set complete compressed input on a freshly initialized or reset stream
+ *
+ * The caller keeps the input alive and unchanged until infl_reset() or
+ * infl_destroy(). A zero-length input is a no-op. Existing input or decode
+ * state is rejected.
+ *
+ * @returns UNZ_OK on success, UNZ_ERR for invalid arguments or state,
+ *          or UNZ_ENOMEM when chunk allocation fails
+ */
+UNZ_EXPORT
+int
+infl_set_input(infl_stream_t * __restrict stream,
+               const void    * __restrict ptr,
+               uint32_t                   len);
+
+/*!
  * @brief inflate given deflated content, all included chunks will be inflated
  *        until end,
  *
@@ -136,8 +152,9 @@ infl_buf(const void * __restrict src,
     return -1;
   }
 
-  infl_include(st, src, srclen);
-  ret = infl(st);
+  ret = infl_set_input(st, src, srclen);
+  if (ret == UNZ_OK)
+    ret = infl(st);
 
   infl_destroy(st);
 

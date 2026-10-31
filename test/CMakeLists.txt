@@ -14,13 +14,18 @@ target_link_libraries(test_files defl)
 
 target_compile_definitions(test_files PRIVATE UNZ_STATIC=1)
 
+add_executable(test_borrowed test_borrowed.c)
+target_link_libraries(test_borrowed PRIVATE defl)
+target_compile_definitions(test_borrowed PRIVATE UNZ_STATIC=1)
+add_test(NAME borrowed_inputs COMMAND test_borrowed)
+
 if(NOT WIN32)
     find_package(Threads REQUIRED)
     add_executable(test_parallel test_parallel.c)
     target_link_libraries(test_parallel PRIVATE defl Threads::Threads)
     target_compile_definitions(test_parallel PRIVATE UNZ_STATIC=1)
 
-    foreach(mode RANGE 0 2)
+    foreach(mode RANGE 0 3)
         add_test(NAME parallel_first_use_${mode} COMMAND test_parallel ${mode})
         set_tests_properties(parallel_first_use_${mode} PROPERTIES TIMEOUT 20)
     endforeach()
