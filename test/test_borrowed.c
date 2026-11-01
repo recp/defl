@@ -61,11 +61,58 @@ stored_chunks(size_t chunk_size, int mixed) {
       break;
     result = infl(stream);
     if (result != UNZ_OK || infl_output_pos(stream) != sizeof(output)
+        || infl_input_pos(stream) != sizeof(input)
         || memcmp(output, input + 5, sizeof(output)) != 0) {
       result = UNZ_ERR;
       break;
     }
   }
+  infl_destroy(stream);
+  return result != UNZ_OK;
+}
+
+static int
+mixed_input_position(size_t chunk_size, int borrowed, size_t padding) {
+  static const uint8_t input[] = {
+    0, 4, 0, 0xfb, 0xff, 'A', 'B', 'C', 'D', 3, 0, 0xaa, 0xbb
+  };
+  uint8_t        output[4];
+  infl_stream_t *stream;
+  size_t         offset, count, size;
+  int            result, round;
+
+  size = sizeof(input) - 2 + padding;
+  if (!(stream = infl_init(output, sizeof(output), 0)))
+    return 1;
+
+  result = UNZ_OK;
+  for (round = 0; round < 8; round++) {
+    infl_reset(stream, output, sizeof(output), 0);
+    if (infl_input_pos(stream) != 0) {
+      result = UNZ_ERR;
+      break;
+    }
+
+    if (borrowed) {
+      result = infl_set_input(stream, input, (uint32_t)size);
+    } else {
+      for (offset = 0; offset < size; offset += count) {
+        count = size - offset;
+        if (count > chunk_size)
+          count = chunk_size;
+        infl_include(stream, input + offset, (uint32_t)count);
+      }
+    }
+
+    if (result != UNZ_OK || infl_input_pos(stream) != 0
+        || infl(stream) != UNZ_OK || infl_output_pos(stream) != sizeof(output)
+        || infl_input_pos(stream) != sizeof(input) - 2
+        || memcmp(output, "ABCD", sizeof(output)) != 0) {
+      result = UNZ_ERR;
+      break;
+    }
+  }
+
   infl_destroy(stream);
   return result != UNZ_OK;
 }
@@ -114,6 +161,14 @@ main(void) {
   for (i = 0; i < sizeof(sizes) / sizeof(sizes[0]); i++) {
     if (stored_chunks(sizes[i], 0) || stored_chunks(sizes[i], 1)) {
       fprintf(stderr, "borrowed input failed at chunk size %zu\n", sizes[i]);
+      return 1;
+    }
+
+    if (mixed_input_position(sizes[i], 0, 0)
+        || mixed_input_position(sizes[i], 0, 2)
+        || mixed_input_position(sizes[i], 1, 0)
+        || mixed_input_position(sizes[i], 1, 2)) {
+      fprintf(stderr, "mixed input position failed at chunk size %zu\n", sizes[i]);
       return 1;
     }
   }

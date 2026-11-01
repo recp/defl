@@ -335,7 +335,8 @@ infl_input_pos(const infl_stream_t * __restrict stream) {
   size_t pos;
   unsigned unread;
 
-  if (!stream || !stream->bs.chunk)
+  /* exhausted input can clear the chunk while buffered end bits remain. */
+  if (!stream || !stream->bs.p)
     return 0u;
 
   pos = 0;
